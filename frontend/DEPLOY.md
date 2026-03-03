@@ -1,6 +1,6 @@
 # Deploy Frontend to Vercel
 
-The root `vercel.json` configures Vercel to build and serve the frontend. No Root Directory change needed.
+The root `vercel.json` sets `rootDirectory: "frontend"` so Vercel builds and serves the frontend from that folder.
 
 ## Backend URL (required)
 
