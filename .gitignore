@@ -6,3 +6,6 @@ frontend/node_modules/
 *.log
 logs/
 .DS_Store
+SESSION_*.md
+FILE_TREE.md
+.claude/

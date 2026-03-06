@@ -3,9 +3,13 @@ import { logger } from './lib/logger.js';
 import { pool } from './db/connection.js';
 import { buildServer } from './api/server.js';
 import { startScheduler } from './fetcher/scheduler.js';
+import { runMigrations } from './db/migrate.js';
 
 async function main(): Promise<void> {
   logger.info('Bridge Dashboard starting...');
+
+  // Run migrations before anything else (idempotent — uses IF NOT EXISTS)
+  await runMigrations();
 
   const result = await pool.query<{ now: string }>('SELECT NOW() as now');
   logger.info({ time: result.rows[0]?.now }, 'Database connected');

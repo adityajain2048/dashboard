@@ -59,9 +59,14 @@ async function runMigrations(): Promise<void> {
   }
 }
 
-runMigrations()
-  .then(() => process.exit(0))
-  .catch((err) => {
-    logger.fatal(err, 'Migration failed');
-    process.exit(1);
-  });
+export { runMigrations };
+
+// Only run standalone when executed directly (npm run migrate)
+if (process.argv[1]?.endsWith('migrate.ts') || process.argv[1]?.endsWith('migrate.js')) {
+  runMigrations()
+    .then(() => process.exit(0))
+    .catch((err) => {
+      logger.fatal(err, 'Migration failed');
+      process.exit(1);
+    });
+}
