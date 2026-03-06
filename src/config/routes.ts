@@ -83,7 +83,7 @@ const T3_ASSETS: readonly Asset[] = ['USDC', 'ETH'];  // Reduced for long-tail
 // Use all three tiers for high-volume Tier 1 corridors as well
 const T1_AMOUNTS = [50, 1000, 50000] as const;
 const T2_AMOUNTS = [50, 1000, 50000] as const;
-const T3_AMOUNTS = [1000] as const;
+const T3_AMOUNTS = [50, 1000, 50000] as const;
 
 /** Bitcoin has no native USDC/USDT — only ETH (bridges to BTC). Skip stablecoins. */
 const BITCOIN_ASSETS: readonly Asset[] = ['ETH'];

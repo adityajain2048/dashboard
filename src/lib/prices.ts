@@ -10,11 +10,11 @@ const CHAIN_TO_COINGECKO_ID: Record<string, string> = {
   arbitrum: 'ethereum',
   base: 'ethereum',
   optimism: 'ethereum',
-  polygon: 'matic-network',
+  polygon: 'polygon-ecosystem-token',   // POL (ex-MATIC); 'matic-network' deprecated
   bsc: 'binancecoin',
   avalanche: 'avalanche-2',
-  sonic: 'ethereum',       // S token may not be listed; fallback ETH
-  berachain: 'ethereum',   // BERA; fallback
+  sonic: 'sonic-3',                     // Sonic S token (chain native); 'sonic' is a different coin
+  berachain: 'berachain-bera',           // BERA native token
   scroll: 'ethereum',
   linea: 'ethereum',
   zksync: 'ethereum',
@@ -22,7 +22,7 @@ const CHAIN_TO_COINGECKO_ID: Record<string, string> = {
   hyperliquid: 'hyperliquid',
   abstract: 'ethereum',
   unichain: 'ethereum',
-  monad: 'ethereum',      // MON when listed
+  monad: 'monad',                       // MON native token
   megaeth: 'ethereum',
   solana: 'solana',
   bitcoin: 'bitcoin',
@@ -32,16 +32,18 @@ const COINGECKO_IDS = [...new Set(Object.values(CHAIN_TO_COINGECKO_ID))];
 const CACHE_TTL_MS = 60_000; // refresh at most once per minute
 const FALLBACK_ETH_PRICE = 2_500;
 
-/** Chain-specific fallback when CoinGecko cache is empty (avalanche, bsc, etc. use native token price) */
+/** Chain-specific fallback when CoinGecko cache is empty.
+ *  Updated 2026-03-06 to match approximate market prices. */
 const CHAIN_FALLBACK_NATIVE_PRICE: Record<string, number> = {
-  'avalanche': 35,   // AVAX
-  'bsc': 700,       // BNB
-  'polygon': 0.5,   // POL
-  'sonic': 2_500,   // S (fallback to ETH)
-  'berachain': 0.1, // BERA
-  'mantle': 0.6,    // MNT
-  'hyperliquid': 25, // HYPE
-  'monad': 2_500,   // MON (fallback)
+  'avalanche': 10,    // AVAX (~$9-10 as of Mar 2026)
+  'bsc': 650,         // BNB
+  'polygon': 0.10,    // POL (ex-MATIC, ~$0.10)
+  'sonic': 0.04,      // S (Sonic native, ~$0.04)
+  'berachain': 0.50,  // BERA (~$0.54 as of Mar 2026)
+  'mantle': 0.70,     // MNT
+  'hyperliquid': 30,  // HYPE
+  'monad': 0.02,      // MON (~$0.022 as of Mar 2026)
+  'bitcoin': 70_000,  // BTC (~$70k as of Mar 2026)
 };
 
 let cache: Record<string, number> = {};

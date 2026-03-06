@@ -3,7 +3,7 @@ import type { NormalizedQuote, RouteKey } from '../../types/index.js';
 import { getToken, isPlaceholder } from '../../config/tokens.js';
 import { getChain } from '../../config/chains.js';
 import { resolveBridgeName } from '../../config/bridges.js';
-import { getFromAmountBase } from '../../lib/amounts.js';
+import { getFromAmountBase, outputAmountToUsd } from '../../lib/amounts.js';
 import { logger } from '../../lib/logger.js';
 
 /** Chains that Rango's /routing/best endpoint does not support (confirmed via 400 responses). */
@@ -123,16 +123,20 @@ export async function fetchRango(route: RouteKey): Promise<NormalizedQuote[]> {
 
   const firstSwap = swaps[0]!;
   const bridgeName = firstSwap.swapperId;
-  const bridge = resolveBridgeName('rango', bridgeName);
+  const bridge = resolveBridgeName('rango', bridgeName) ?? bridgeName.toLowerCase();
   if (!bridge) return [];
 
-  const outputAmount = result.outputAmount;
+  // Rango sometimes returns fractional base units (e.g. "998499999.993264"); truncate to integer
+  const outputAmount = result.outputAmount.split('.')[0]!;
   const requestAmount = parsed.data.requestAmount ?? amountBase;
 
   const inputPrice = firstSwap.from.usdPrice ?? 0;
   const outputPrice = firstSwap.to.usdPrice ?? 0;
   const inputUsd = inputPrice > 0 ? String(Number(requestAmount) / (10 ** srcToken.decimals) * inputPrice) : String(route.amountTier);
-  const outputUsd = outputPrice > 0 ? String(Number(outputAmount) / (10 ** dstToken.decimals) * outputPrice) : '0';
+  const outputUsd =
+    outputPrice > 0
+      ? String(Number(outputAmount) / (10 ** dstToken.decimals) * outputPrice)
+      : String(outputAmountToUsd(outputAmount, dstToken.decimals, route.asset, route.dst));
 
   const allFees = firstSwap.fee ?? [];
   let gasCostUsd = 0;

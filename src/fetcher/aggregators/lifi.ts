@@ -84,10 +84,13 @@ export async function fetchLifi(route: RouteKey): Promise<NormalizedQuote[]> {
   const fromTokenAddr = route.src === 'bitcoin' && route.asset === 'ETH' ? 'bitcoin' : srcToken.address;
   const toTokenAddr = route.dst === 'bitcoin' && route.asset === 'ETH' ? 'bitcoin' : dstToken.address;
 
-  // LI.FI expects address format matching source chain (EVM 0x, Solana base58)
+  // LI.FI expects address format matching source chain (EVM 0x, Solana base58, Bitcoin bech32)
   const EVM_PLACEHOLDER = '0x000000000000000000000000000000000000dEaD';
   const SOLANA_PLACEHOLDER = '5oNDL3swdJJF1g9DzJiZ4ynHXgszjAEpUkxVYejchzrY';
-  const fromAddress = route.src === 'solana' ? SOLANA_PLACEHOLDER : EVM_PLACEHOLDER;
+  const BITCOIN_PLACEHOLDER = 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4';
+  const fromAddress = route.src === 'solana' ? SOLANA_PLACEHOLDER
+    : route.src === 'bitcoin' ? BITCOIN_PLACEHOLDER
+    : EVM_PLACEHOLDER;
 
   const apiKey = getNextLifiKey();
   const body = {

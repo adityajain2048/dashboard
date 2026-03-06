@@ -1,6 +1,6 @@
 import type { NormalizedQuote, RouteKey } from '../../types/index.js';
 import { getToken } from '../../config/tokens.js';
-import { getFromAmountHuman } from '../../lib/amounts.js';
+import { getFromAmountHuman, getFromAmountBase, humanToBase } from '../../lib/amounts.js';
 import { logger } from '../../lib/logger.js';
 
 export async function fetchMayan(route: RouteKey): Promise<NormalizedQuote[]> {
@@ -8,6 +8,7 @@ export async function fetchMayan(route: RouteKey): Promise<NormalizedQuote[]> {
     const srcToken = getToken(route.src, route.asset);
     const dstToken = getToken(route.dst, route.asset);
     const amountHuman = getFromAmountHuman(route.amountTier, route.asset, route.src);
+    const inputAmountBase = getFromAmountBase(route.amountTier, route.asset, srcToken.decimals, route.src);
     const url = new URL('https://price-api.mayan.finance/v3/quote');
     url.searchParams.set('amountIn', amountHuman);
     url.searchParams.set('fromToken', srcToken.address);
@@ -37,8 +38,8 @@ export async function fetchMayan(route: RouteKey): Promise<NormalizedQuote[]> {
       amountTier: route.amountTier,
       source: 'direct',
       bridge: 'mayan',
-      inputAmount: '',
-      outputAmount,
+      inputAmount: inputAmountBase,
+      outputAmount: humanToBase(outputAmount, dstToken.decimals),
       inputUsd: String(route.amountTier),
       outputUsd,
       gasCostUsd: '0',

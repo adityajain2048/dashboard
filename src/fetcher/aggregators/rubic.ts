@@ -3,7 +3,7 @@ import type { NormalizedQuote, RouteKey } from '../../types/index.js';
 import { getToken } from '../../config/tokens.js';
 import { isPlaceholder } from '../../config/tokens.js';
 import { resolveBridgeName } from '../../config/bridges.js';
-import { getFromAmountHuman } from '../../lib/amounts.js';
+import { getFromAmountHuman, getFromAmountBase, humanToBase } from '../../lib/amounts.js';
 import { logger } from '../../lib/logger.js';
 
 /** Rubic uses 0x0 for native tokens (docs); we use LI.FI sentinel elsewhere */
@@ -76,6 +76,7 @@ export async function fetchRubic(route: RouteKey, options?: RubicFetchOptions): 
       : dstToken.address;
 
   const amountHuman = getFromAmountHuman(route.amountTier, route.asset, route.src);
+  const inputAmountBase = getFromAmountBase(route.amountTier, route.asset, srcToken.decimals, route.src);
   const body = {
     srcTokenAddress: srcAddress,
     srcTokenBlockchain: srcBlockchain,
@@ -195,8 +196,8 @@ export async function fetchRubic(route: RouteKey, options?: RubicFetchOptions): 
     amountTier: route.amountTier,
     source: 'rubic',
     bridge: canonicalBridge,
-    inputAmount: '',
-    outputAmount: q.estimate.destinationTokenAmount,
+    inputAmount: inputAmountBase,
+    outputAmount: humanToBase(q.estimate.destinationTokenAmount, dstToken.decimals),
     inputUsd: String(route.amountTier),
     outputUsd: String(destUsd),
     gasCostUsd: '0',

@@ -5,16 +5,14 @@
 import type { Asset } from '../types/index.js';
 import { getNativePriceUsd } from './prices.js';
 
-const MIN_ETH_PRICE = 100;
 const MAX_ETH_PRICE = 1_000_000;
 
 /** USD price for the given asset. For ETH/native, pass sourceChain to use live price.
- * Clamps to sane range to avoid sending dust or overflow. */
-function getTokenPriceUsd(asset: Asset, sourceChain?: string): number {
+ * Uses CoinGecko cache; falls back to chain-specific defaults in prices.ts. */
+export function getTokenPriceUsd(asset: Asset, sourceChain?: string): number {
   if (asset === 'USDC' || asset === 'USDT') return 1;
-  let price = sourceChain ? getNativePriceUsd(sourceChain) : getNativePriceUsd('ethereum');
-  if (price <= 0 || price > MAX_ETH_PRICE) price = 2500;
-  if (price < MIN_ETH_PRICE) price = MIN_ETH_PRICE;
+  const price = sourceChain ? getNativePriceUsd(sourceChain) : getNativePriceUsd('ethereum');
+  if (price <= 0 || price > MAX_ETH_PRICE) return 2500;
   return price;
 }
 
@@ -66,7 +64,38 @@ export function outputAmountToUsd(
   return human * price;
 }
 
-/** From-amount as human string (e.g. "0.4") for APIs that expect token amount (Rubic, Relay, Mayan). */
+/** Convert a human-readable token amount string to base units (wei).
+ *  e.g. humanToBase("0.95", 6) → "950000"
+ *  Uses BigInt arithmetic to avoid floating-point precision loss. */
+export function humanToBase(humanAmount: string, decimals: number): string {
+  const num = Number(humanAmount);
+  if (!Number.isFinite(num) || num <= 0) return '0';
+  const SCALE = 8;
+  const scaled = BigInt(Math.round(num * 10 ** SCALE));
+  const diff = decimals - SCALE;
+  if (diff >= 0) {
+    return (scaled * (10n ** BigInt(diff))).toString();
+  } else {
+    return (scaled / (10n ** BigInt(-diff))).toString();
+  }
+}
+
+/** Compute USD value of a base-unit amount using CoinGecko prices.
+ *  For stablecoins, uses 1:1. For native tokens, uses live CoinGecko price.
+ *  Returns a string with 8 decimal places (matching DB schema). */
+export function computeAmountUsd(
+  amountBase: string,
+  decimals: number,
+  asset: Asset,
+  chain: string
+): string {
+  const price = getTokenPriceUsd(asset, chain);
+  const human = Number(amountBase) / 10 ** decimals;
+  return (human * price).toFixed(8);
+}
+
+/** From-amount as human string (e.g. "0.4") for APIs that expect token amount (Rubic, Relay, Mayan).
+ *  NOT for NormalizedQuote storage — use getFromAmountBase() or humanToBase() for that. */
 export function getFromAmountHuman(
   amountTierUsd: number,
   asset: Asset,

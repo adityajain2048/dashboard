@@ -53,7 +53,30 @@
       "Bash(docker compose exec db psql -U bridge -d bridge_dashboard -c \"SELECT table_name, \\(SELECT COUNT\\(*\\) FROM information_schema.columns WHERE table_name = t.table_name\\) as col_count FROM information_schema.tables t WHERE table_schema = ''public'' ORDER BY table_name;\")",
       "Bash(docker compose exec db psql -U bridge -d bridge_dashboard -c \"SELECT COUNT\\(*\\) as cnt, ''fetch_log'' as tbl FROM fetch_log UNION ALL SELECT COUNT\\(*\\), ''quotes'' FROM quotes UNION ALL SELECT COUNT\\(*\\), ''route_latest'' FROM route_latest UNION ALL SELECT COUNT\\(*\\), ''route_status'' FROM route_status;\")",
       "Bash(git init:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git:*)",
+      "Bash(vercel --version)",
+      "Bash(npm install -g vercel)",
+      "Bash(vercel whoami)",
+      "Bash(brew install cloudflared)",
+      "Bash(curl -s https://routes-cook-tapes-anime.trycloudflare.com/api/health)",
+      "Bash(curl -s https://flashing-been-real-apparent.trycloudflare.com/api/health)",
+      "Bash(vercel env:*)",
+      "Bash(vercel deploy:*)",
+      "Bash(__NEW_LINE_2f394237d672de45__ echo \"\")",
+      "Bash(curl -s \"https://api.coingecko.com/api/v3/simple/price?ids=sonic-svm&vs_currencies=usd\")",
+      "Bash(__NEW_LINE_ffaac340f00ff56c__ echo \"\")",
+      "Bash(curl -s \"https://api.coingecko.com/api/v3/search?query=fantom\")",
+      "Bash(curl -s \"https://api.coingecko.com/api/v3/simple/price?ids=fantom&vs_currencies=usd\")",
+      "Bash(__NEW_LINE_a0573f5d0338ab1c__ echo \"\")",
+      "Bash(curl -s \"https://api.coingecko.com/api/v3/simple/price?ids=sonic-3&vs_currencies=usd\")",
+      "Bash(curl -s \"https://api.coingecko.com/api/v3/simple/price?ids=fantom,sonic-svm,sonic-3&vs_currencies=usd\")",
+      "WebFetch(domain:www.coingecko.com)",
+      "Bash(pkill -f \"tsx.*src/index.ts\")",
+      "Bash(node -e \":*)",
+      "Bash(pgrep -f \"ts-node|tsx\")",
+      "Bash(ps -p 32614 -o command=)",
+      "Bash(ps -p 9684 -o command=)"
     ]
   }
 }

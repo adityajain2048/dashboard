@@ -1,6 +1,7 @@
 import type { NormalizedQuote, RouteKey } from '../../types/index.js';
 import { getChain } from '../../config/chains.js';
-import { getFromAmountHuman } from '../../lib/amounts.js';
+import { getToken } from '../../config/tokens.js';
+import { getFromAmountHuman, getFromAmountBase, humanToBase } from '../../lib/amounts.js';
 import { logger } from '../../lib/logger.js';
 
 export async function fetchRelay(route: RouteKey): Promise<NormalizedQuote[]> {
@@ -10,6 +11,9 @@ export async function fetchRelay(route: RouteKey): Promise<NormalizedQuote[]> {
     const fromChainId = typeof srcChain.chainId === 'number' ? srcChain.chainId : null;
     const toChainId = typeof dstChain.chainId === 'number' ? dstChain.chainId : null;
     if (fromChainId === null || toChainId === null) return [];
+    const srcToken = getToken(route.src, route.asset);
+    const dstToken = getToken(route.dst, route.asset);
+    const inputAmountBase = getFromAmountBase(route.amountTier, route.asset, srcToken.decimals, route.src);
 
     const body = {
       user: '0x0000000000000000000000000000000000000000',
@@ -51,8 +55,10 @@ export async function fetchRelay(route: RouteKey): Promise<NormalizedQuote[]> {
       amountTier: route.amountTier,
       source: 'direct',
       bridge: 'relay',
-      inputAmount: '',
-      outputAmount: out?.amountFormatted ?? String(outputUsd),
+      inputAmount: inputAmountBase,
+      outputAmount: out?.amountFormatted
+        ? humanToBase(out.amountFormatted, dstToken.decimals)
+        : getFromAmountBase(outputUsd, route.asset, dstToken.decimals, route.dst),
       inputUsd: String(route.amountTier),
       outputUsd: String(outputUsd),
       gasCostUsd: '0',

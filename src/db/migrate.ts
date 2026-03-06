@@ -31,7 +31,7 @@ async function runMigrations(): Promise<void> {
     sqlFiles = files.filter((f) => f.endsWith('.sql') && f !== '000_init_plain.sql').sort();
     logger.info('TimescaleDB detected — using full schema');
   } else {
-    sqlFiles = files.filter((f) => f === '000_init_plain.sql' || f === '003_route_status_best_fee_bps.sql').sort();
+    sqlFiles = files.filter((f) => ['000_init_plain.sql', '002_route_latest_bridge_source_pk.sql', '003_route_status_best_fee_bps.sql', '004_route_latest_input_amount.sql'].includes(f)).sort();
     logger.warn('TimescaleDB NOT available — using plain PostgreSQL schema (no hypertables, compression, or continuous aggregates)');
   }
 

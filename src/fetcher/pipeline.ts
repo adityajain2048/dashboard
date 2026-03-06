@@ -4,6 +4,7 @@ import { routeTag, logger as rootLogger } from '../lib/logger.js';
 import { fetchAllAggregators } from './aggregators/index.js';
 import { gapFill } from './bridges/index.js';
 import { rankQuotes, deduplicateQuotes } from './normalizer.js';
+import { recalcQuotesUsd } from './recalcUsd.js';
 import {
   insertQuotesBatch,
   upsertRouteLatest,
@@ -30,7 +31,9 @@ export async function processRoute(
 
   const withBatchId = allQuotes.map((q) => ({ ...q, batchId }));
   const deduped = deduplicateQuotes(withBatchId);
-  const ranked = rankQuotes(deduped);
+  // Recalculate USD values using CoinGecko prices (overrides aggregator USD values)
+  const recalced = recalcQuotesUsd(deduped);
+  const ranked = rankQuotes(recalced);
 
   try {
     if (ranked.length > 0) {

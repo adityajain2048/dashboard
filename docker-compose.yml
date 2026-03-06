@@ -9,6 +9,7 @@ services:
       POSTGRES_DB: bridge_dashboard
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./docker/init-baseline.sh:/docker-entrypoint-initdb.d/init-baseline.sh
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U bridge -d bridge_dashboard"]
       interval: 5s

@@ -83,7 +83,7 @@ export async function fetchBungee(route: RouteKey): Promise<NormalizedQuote[]> {
   const ts = new Date();
   for (const r of parsed.data.result.routes) {
     const bridgeName = r.usedBridgeNames?.[0] ?? '';
-    const bridge = resolveBridgeName('bungee', bridgeName);
+    const bridge = resolveBridgeName('bungee', bridgeName) ?? bridgeName.toLowerCase();
     if (!bridge) continue;
 
     const gasUsd = r.totalGasFeesInUsd ?? 0;

@@ -1,19 +1,16 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { fetchQuotes } from '../api/client';
 import { HEATMAP_ORDER, getChainMeta, getReceiveSymbol, getAssetSymbol } from '../config/chains';
+import { getDecimals } from '../config/decimals';
 import { ChainIcon } from '../components/ChainIcon';
 import { AssetIcon } from '../components/AssetIcon';
 
-/** Decimals by asset for formatting raw token amounts (base units). */
-const ASSET_DECIMALS: Record<string, number> = { ETH: 18, USDC: 6, USDT: 6 };
-
 /** Format token amount. Aggregators return base units (wei/smallest unit).
- * If num >= 10^decimals, treat as base units; else treat as human (e.g. 998.5). */
-function formatTokenAmount(rawAmount: string, asset: string): string {
-  const dec = ASSET_DECIMALS[asset] ?? 18;
+ * Always divide by 10^decimals — single source of truth from decimals config. */
+function formatTokenAmount(rawAmount: string, asset: string, chain: string): string {
+  const dec = getDecimals(chain, asset);
   const num = Number(rawAmount);
-  const threshold = 10 ** dec;
-  const n = num >= threshold ? num / threshold : num;
+  const n = dec > 0 ? num / 10 ** dec : num;
   if (n >= 1000) return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
   if (n >= 1) return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 });
   if (n >= 0.0001) return n.toLocaleString(undefined, { maximumFractionDigits: 6 });
@@ -287,7 +284,7 @@ export function RouteExplorer({ asset, tier, selectedRoute }: RouteExplorerProps
                     ${parseFloat(q.outputUsd).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </div>
                   <div style={{ fontSize: 10, color: '#666', marginTop: 1 }}>
-                    {formatTokenAmount(q.outputAmount, asset)} {getReceiveSymbol(asset, dst)}
+                    {formatTokenAmount(q.outputAmount, asset, dst)} {getReceiveSymbol(asset, dst)}
                     {parseFloat(q.outputUsd) < tier * 0.05 && (
                       <span style={{ marginLeft: 6, fontSize: 9, color: '#F59E0B' }} title="Output much lower than expected — may need refresh">⚠</span>
                     )}

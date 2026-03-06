@@ -54,14 +54,15 @@ export async function upsertRouteLatest(quotes: NormalizedQuote[]): Promise<void
       await client.query(
         `INSERT INTO route_latest (
           src_chain, dst_chain, asset, amount_tier, bridge, source,
-          ts, batch_id, output_amount, output_usd, input_usd, gas_cost_usd,
+          ts, batch_id, input_amount, output_amount, output_usd, input_usd, gas_cost_usd,
           total_fee_bps, total_fee_usd, estimated_seconds,
           rank_by_output, spread_bps
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         ON CONFLICT (src_chain, dst_chain, asset, amount_tier, bridge, source)
         DO UPDATE SET
           ts = EXCLUDED.ts,
           batch_id = EXCLUDED.batch_id,
+          input_amount = EXCLUDED.input_amount,
           output_amount = EXCLUDED.output_amount,
           output_usd = EXCLUDED.output_usd,
           input_usd = EXCLUDED.input_usd,
@@ -80,6 +81,7 @@ export async function upsertRouteLatest(quotes: NormalizedQuote[]): Promise<void
           q.source,
           q.ts,
           q.batchId,
+          q.inputAmount,
           q.outputAmount,
           q.outputUsd,
           q.inputUsd,
@@ -243,6 +245,7 @@ interface RouteLatestRow {
   amount_tier: number;
   bridge: string;
   source: string;
+  input_amount: string;
   output_amount: string;
   output_usd: string;
   input_usd: string;
@@ -263,7 +266,7 @@ export async function getQuotesForRoute(
 ): Promise<NormalizedQuote[]> {
   const result = await query<RouteLatestRow>(
     `SELECT ts, batch_id, src_chain, dst_chain, asset, amount_tier, bridge, source,
-            output_amount, output_usd, input_usd, gas_cost_usd, total_fee_bps, total_fee_usd,
+            input_amount, output_amount, output_usd, input_usd, gas_cost_usd, total_fee_bps, total_fee_usd,
             estimated_seconds, rank_by_output, spread_bps
      FROM route_latest
      WHERE src_chain = $1 AND dst_chain = $2 AND asset = $3 AND amount_tier = $4
@@ -280,7 +283,7 @@ export async function getQuotesForRoute(
     amountTier: row.amount_tier,
     source: row.source as NormalizedQuote['source'],
     bridge: row.bridge,
-    inputAmount: '',
+    inputAmount: row.input_amount,
     outputAmount: row.output_amount,
     inputUsd: row.input_usd,
     outputUsd: row.output_usd,

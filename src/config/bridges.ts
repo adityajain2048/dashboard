@@ -223,18 +223,22 @@ export const RANGO_BRIDGE_MAP: Record<string, string> = {
 };
 
 export const BUNGEE_BRIDGE_MAP: Record<string, string> = {
-  'across':           'across',
-  'stargate':         'stargate',
-  'hop':              'hop',
-  'orbiter':          'orbiter',
-  'relay':            'relay',
-  'symbiosis':        'symbiosis',
-  'synapse':          'synapse',     // not tracked
-  'cbridge':          'cbridge',
-  'cctp':             'cctp',
-  'connext':          'everclear',
-  'hyperlane':        'hyperlane',
-  'wormhole':         'wormhole',
+  'across':                  'across',
+  'stargate':                'stargate',
+  'hop':                     'hop',
+  'orbiter':                 'orbiter',
+  'relay':                   'relay',
+  'symbiosis':               'symbiosis',
+  'synapse':                 'synapse',     // not tracked
+  'cbridge':                 'cbridge',
+  'celer':                   'cbridge',
+  'cctp':                    'cctp',
+  'connext':                 'everclear',
+  'hyperlane':               'hyperlane',
+  'wormhole':                'wormhole',
+  'mantle-native-bridge':    'mantle-native-bridge',
+  'optimism-bridge':         'optimism-bridge',
+  'arbitrum-bridge':         'arbitrum-bridge',
 };
 
 /** Resolve aggregator bridge name → canonical bridge ID. Returns null if unknown. */

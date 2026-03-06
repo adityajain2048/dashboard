@@ -8,6 +8,8 @@
     "build": "tsc",
     "start": "node dist/src/index.js",
     "migrate": "tsx src/db/migrate.ts",
+    "migrate:baseline": "tsx scripts/migrate-baseline.ts",
+    "snapshot:baseline": "tsx scripts/snapshot-baseline.ts",
     "test": "vitest run",
     "verify:db": "tsx scripts/verify-db.ts",
     "verify:fetcher": "tsx scripts/verify-fetcher.ts",
