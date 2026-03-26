@@ -9,30 +9,56 @@ import { logger } from '../lib/logger.js';
 
 const MIGRATIONS_DIR = join(process.cwd(), 'migrations');
 
-async function hasTimescaleDB(): Promise<boolean> {
+type TsdbEdition = 'none' | 'apache' | 'tsl';
+
+async function detectTimescaleDB(): Promise<TsdbEdition> {
   const client = await pool.connect();
   try {
     const res = await client.query(
       "SELECT 1 FROM pg_available_extensions WHERE name = 'timescaledb'"
     );
-    return res.rows.length > 0;
+    if (res.rows.length === 0) return 'none';
+
+    // Check if the extension is already loaded and what license it runs under
+    try {
+      const licRes = await client.query("SHOW timescaledb.license");
+      const license = licRes.rows[0]?.timescaledb_license ?? licRes.rows[0]?.['timescaledb.license'] ?? '';
+      if (license === 'apache') return 'apache';
+      return 'tsl';
+    } catch {
+      // Extension available but not yet loaded — check if shared_preload_libraries includes it
+      // If not loadable, treat as apache (safe default — no TSL features)
+      return 'apache';
+    }
   } finally {
     client.release();
   }
 }
 
+const COMMON_MIGRATIONS = [
+  '002_route_latest_bridge_source_pk.sql',
+  '003_route_status_best_fee_bps.sql',
+  '004_route_latest_input_amount.sql',
+];
+
 async function runMigrations(): Promise<void> {
-  const tsdb = await hasTimescaleDB();
+  const edition = await detectTimescaleDB();
 
   const files = await readdir(MIGRATIONS_DIR);
   let sqlFiles: string[];
 
-  if (tsdb) {
-    sqlFiles = files.filter((f) => f.endsWith('.sql') && f !== '000_init_plain.sql').sort();
-    logger.info('TimescaleDB detected — using full schema');
+  if (edition === 'tsl') {
+    // Full TimescaleDB with Timescale License — use full schema (hypertables + continuous aggregates + compression)
+    sqlFiles = ['001_init.sql', ...COMMON_MIGRATIONS].filter((f) => files.includes(f));
+    logger.info('TimescaleDB (TSL) detected — using full schema');
+  } else if (edition === 'apache') {
+    // TimescaleDB Apache/community edition — hypertables yes, but no continuous aggregates/compression/retention
+    sqlFiles = ['001_init_community.sql', ...COMMON_MIGRATIONS].filter((f) => files.includes(f));
+    logger.info('TimescaleDB (Apache/community) detected — using community schema (hypertables only, no continuous aggregates)');
   } else {
-    sqlFiles = files.filter((f) => ['000_init_plain.sql', '002_route_latest_bridge_source_pk.sql', '003_route_status_best_fee_bps.sql', '004_route_latest_input_amount.sql'].includes(f)).sort();
-    logger.warn('TimescaleDB NOT available — using plain PostgreSQL schema (no hypertables, compression, or continuous aggregates)');
+    // No TimescaleDB — plain PostgreSQL tables
+    sqlFiles = ['000_init_plain.sql', ...COMMON_MIGRATIONS].filter((f) => files.includes(f));
+    logger.warn('TimescaleDB NOT available — using plain PostgreSQL schema (no hypertables)');
   }
 
   if (sqlFiles.length === 0) {

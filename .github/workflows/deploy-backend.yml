@@ -12,10 +12,10 @@ on:
       - 'tsconfig.json'
 
 env:
-  ACR_NAME: bridgedashboardacr
+  ACR_NAME: telisbridgeacr
   IMAGE_NAME: bridge-dashboard
-  RESOURCE_GROUP: bridge-dashboard-rg
-  CONTAINER_APP_NAME: bridge-dashboard-api
+  RESOURCE_GROUP: rg-dev-jpe
+  CONTAINER_APP_NAME: bridge-dashboard
 
 jobs:
   build-and-deploy:

@@ -1,8 +1,6 @@
-// Opportunities view — kept for future use but currently integrated into the bottom stats bar.
-// The top opportunity is shown in App.tsx's footer. This full view can be re-added as a tab/panel later.
-
 import { useState, useEffect } from 'react';
 import { fetchOpportunities } from '../api/client';
+import { ChainIcon } from '../components/ChainIcon';
 
 interface Opp {
   src: string;
@@ -18,7 +16,11 @@ interface Opp {
   lastSeen: string | null;
 }
 
-export function Opportunities() {
+interface Props {
+  onRouteClick?: (src: string, dst: string) => void;
+}
+
+export function Opportunities({ onRouteClick }: Props) {
   const [opportunities, setOpportunities] = useState<Opp[]>([]);
   const [total, setTotal] = useState(0);
   const [limit, setLimit] = useState(20);
@@ -85,9 +87,23 @@ export function Opportunities() {
                 <tr><td colSpan={7} style={{ padding: 20, textAlign: 'center', color: '#555' }}>No opportunities</td></tr>
               ) : (
                 opportunities.map((o, i) => (
-                  <tr key={i} style={{ borderBottom: '1px solid #1a1a2e' }}>
+                  <tr
+                    key={i}
+                    style={{ borderBottom: '1px solid #1a1a2e', cursor: onRouteClick ? 'pointer' : 'default' }}
+                    onClick={() => onRouteClick?.(o.src, o.dst)}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = '#6CF9D808'; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'; }}
+                  >
                     <td style={{ padding: '8px 12px', color: '#555' }}>{i + 1}</td>
-                    <td style={{ padding: '8px 12px', color: '#e0e0f0', fontWeight: 600 }}>{o.src} &rarr; {o.dst}</td>
+                    <td style={{ padding: '8px 12px' }}>
+                      <div className="flex items-center gap-1.5">
+                        <ChainIcon chain={o.src} size="sm" />
+                        <span style={{ color: '#e0e0f0', fontWeight: 600 }}>{o.src}</span>
+                        <span style={{ color: '#555' }}>&rarr;</span>
+                        <ChainIcon chain={o.dst} size="sm" />
+                        <span style={{ color: '#e0e0f0', fontWeight: 600 }}>{o.dst}</span>
+                      </div>
+                    </td>
                     <td style={{ padding: '8px 12px', color: '#888' }}>{o.asset}</td>
                     <td style={{ padding: '8px 12px', textAlign: 'right', color: '#F59E0B', fontWeight: 600 }}>{o.spreadBps} bps</td>
                     <td style={{ padding: '8px 12px', color: '#6CF9D8' }}>{o.bestBridge ?? '\u2014'}</td>

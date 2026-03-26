@@ -49,6 +49,9 @@ export async function buildServer(): Promise<ReturnType<typeof Fastify>> {
   await app.register(import('./routes/quotes.js'), { prefix: '/api' });
   await app.register(import('./routes/matrix.js'), { prefix: '/api' });
   await app.register(import('./routes/opportunities.js'), { prefix: '/api' });
+  await app.register(import('./routes/bridges.js'), { prefix: '/api' });
+  await app.register(import('./routes/history.js'), { prefix: '/api' });
+  await app.register(import('./routes/insights.js'), { prefix: '/api' });
 
   if (process.env.NODE_ENV === 'production') {
     const frontendDist = join(__dirname, '../../frontend/dist');

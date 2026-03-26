@@ -173,15 +173,25 @@ export async function updateRouteStatus(
   let bestBridge: string | null = null;
 
   if (latestRows.length > 0) {
+    // Filter out zero/negative output quotes — these are broken/stale and skew spread
+    const validRows = latestRows.filter((r) => Number(r.output_usd) > 0.01);
+
     const best = latestRows.reduce((a, b) =>
       Number(b.output_usd) > Number(a.output_usd) ? b : a
     );
-    const worst = latestRows.reduce((a, b) =>
-      Number(b.output_usd) < Number(a.output_usd) ? b : a
-    );
     bestBridge = best.bridge;
     bestOutputUsd = best.output_usd;
-    worstOutputUsd = worst.output_usd;
+
+    // For worst, only consider valid (non-zero) rows
+    if (validRows.length > 0) {
+      const worst = validRows.reduce((a, b) =>
+        Number(b.output_usd) < Number(a.output_usd) ? b : a
+      );
+      worstOutputUsd = worst.output_usd;
+    } else {
+      worstOutputUsd = bestOutputUsd;
+    }
+
     // Use total_fee_bps when present; otherwise derive from (input - output) / input
     const storedFee = best.total_fee_bps;
     const inputUsd = Number(best.input_usd ?? 0);
@@ -192,10 +202,16 @@ export async function updateRouteStatus(
     }
     // When we have quotes but couldn't compute fee, use 0 so matrix shows a value instead of dash
     if (bestFeeBps == null) bestFeeBps = 0;
-    if (Number(bestOutputUsd) > 0) {
+    // Only compute spread when the best quote is reasonable (< 10% loss vs input).
+    // Routes where best output is far below input are broken, not arbitrage opportunities.
+    const bestIsReasonable = bestFeeBps != null && bestFeeBps < 1000;
+
+    if (bestIsReasonable && Number(bestOutputUsd) > 0 && validRows.length > 1) {
       spreadBps = Math.round(
         (10000 * (Number(bestOutputUsd) - Number(worstOutputUsd))) / Number(bestOutputUsd)
       );
+    } else {
+      spreadBps = 0;
     }
   }
 
