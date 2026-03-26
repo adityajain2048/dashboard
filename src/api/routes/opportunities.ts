@@ -21,7 +21,8 @@ export default async function opportunitiesRoutes(
     const { limit, minSpreadBps, asset, tier } = parsed.data;
 
     let sql = `SELECT src_chain, dst_chain, asset, amount_tier, spread_bps, best_bridge, best_output_usd, worst_output_usd, quote_count, last_seen
-      FROM route_status WHERE state = 'active' AND spread_bps >= $1`;
+      FROM route_status WHERE state = 'active' AND spread_bps >= $1
+      AND best_fee_bps IS NOT NULL AND best_fee_bps < 1000`;
     const params: (string | number)[] = [minSpreadBps];
     if (asset) {
       params.push(asset);
@@ -48,7 +49,7 @@ export default async function opportunitiesRoutes(
     }>(sql, params);
 
     const countParams: (string | number)[] = ['active', minSpreadBps];
-    let countSql = 'SELECT COUNT(*)::text FROM route_status WHERE state = $1 AND spread_bps >= $2';
+    let countSql = 'SELECT COUNT(*)::text FROM route_status WHERE state = $1 AND spread_bps >= $2 AND best_fee_bps IS NOT NULL AND best_fee_bps < 1000';
     if (asset) {
       countParams.push(asset);
       countSql += ` AND asset = $${countParams.length}`;

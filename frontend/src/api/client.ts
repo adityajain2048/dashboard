@@ -57,3 +57,80 @@ export async function fetchHealth(): Promise<{
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
+
+export interface BridgeCoverageItem {
+  id: string; name: string; routesCovered: number; routesCoveredPct: number;
+  wins: number; winRate: number; avgFeeBps: number | null;
+  avgResponseMs: number | null; successRate: number | null;
+  supportedChains: string[]; maxRoutes: number; chainCoveragePct: number;
+}
+
+export async function fetchBridgeCoverage(): Promise<{
+  bridges: BridgeCoverageItem[];
+  totalActiveRoutes: number;
+  totalTrackedBridges: number;
+}> {
+  const res = await fetch(`${BASE}/api/bridges/coverage`);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchBridgeWinRateByTier(): Promise<{
+  tiers: Array<{ amountTier: number; bridges: Array<{ bridge: string; wins: number; pct: number }> }>;
+}> {
+  const res = await fetch(`${BASE}/api/bridges/win-rate-by-tier`);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export interface AggregatorHealth {
+  id: string; successCount: number; errorCount: number; timeoutCount: number;
+  noRouteCount: number; totalCount: number; successRate: number; avgResponseMs: number | null;
+}
+
+export interface BridgeHealth {
+  id: string; activeQuotes: number; corridors: number; lastSeen: string | null; isStale: boolean;
+}
+
+export async function fetchBridgeHealth(): Promise<{
+  aggregators: AggregatorHealth[];
+  bridges: BridgeHealth[];
+}> {
+  const res = await fetch(`${BASE}/api/bridges/health`);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export interface HistoryDataPoint {
+  ts: string; bridge: string; avgOutputUsd: number; avgFeeBps: number; quoteCount: number;
+}
+
+export async function fetchHistory(
+  src: string, dst: string, asset: string, tier: number, period: string
+): Promise<{
+  route: { src: string; dst: string; asset: string; amountTier: number };
+  period: string;
+  dataPoints: HistoryDataPoint[];
+}> {
+  const res = await fetch(
+    `${BASE}/api/history?src=${encodeURIComponent(src)}&dst=${encodeURIComponent(dst)}&asset=${asset}&tier=${tier}&period=${period}`
+  );
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export interface InsightsData {
+  generatedAt: string;
+  bestRoute: { src: string; dst: string; asset: string; feeBps: number; bridge: string } | null;
+  worstRoute: { src: string; dst: string; asset: string; feeBps: number; bridge: string } | null;
+  biggestSpreads: Array<{ src: string; dst: string; asset: string; spreadBps: number; bridge: string; quoteCount: number }>;
+  routeHealth: { active: number; dead: number; stale: number; singleBridge: number };
+  bridgeDominance: Array<{ bridge: string; wins: number }>;
+  monopolyRouteCount: number;
+}
+
+export async function fetchInsights(): Promise<InsightsData> {
+  const res = await fetch(`${BASE}/api/insights/daily`);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}

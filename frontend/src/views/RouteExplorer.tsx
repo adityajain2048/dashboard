@@ -1,9 +1,11 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { fetchQuotes } from '../api/client';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { fetchQuotes, fetchHistory } from '../api/client';
+import type { HistoryDataPoint } from '../api/client';
 import { HEATMAP_ORDER, getChainMeta, getReceiveSymbol, getAssetSymbol } from '../config/chains';
 import { getDecimals } from '../config/decimals';
 import { ChainIcon } from '../components/ChainIcon';
 import { AssetIcon } from '../components/AssetIcon';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
 /** Format token amount. Aggregators return base units (wei/smallest unit).
  * Always divide by 10^decimals — single source of truth from decimals config. */
@@ -68,6 +70,12 @@ export function RouteExplorer({ asset, tier, selectedRoute }: RouteExplorerProps
   const srcRef = useRef<HTMLDivElement>(null);
   const dstRef = useRef<HTMLDivElement>(null);
 
+  // History chart state
+  const [showHistory, setShowHistory] = useState(false);
+  const [historyPeriod, setHistoryPeriod] = useState<string>('24h');
+  const [historyData, setHistoryData] = useState<HistoryDataPoint[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
   // Apply selectedRoute from heatmap click
   useEffect(() => {
     if (selectedRoute) {
@@ -102,6 +110,16 @@ export function RouteExplorer({ asset, tier, selectedRoute }: RouteExplorerProps
     return () => clearInterval(t);
   }, [load]);
 
+  // Load history data when expanded
+  useEffect(() => {
+    if (!showHistory) return;
+    setHistoryLoading(true);
+    fetchHistory(src, dst, asset, tier, historyPeriod)
+      .then(res => setHistoryData(res.dataPoints))
+      .catch(() => setHistoryData([]))
+      .finally(() => setHistoryLoading(false));
+  }, [showHistory, src, dst, asset, tier, historyPeriod]);
+
   // Close dropdowns on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -121,6 +139,16 @@ export function RouteExplorer({ asset, tier, selectedRoute }: RouteExplorerProps
     ? ((quotes[quotes.length - 1]?.spreadBps ?? 0) / 100).toFixed(2)
     : '0';
   const aggCount = new Set(quotes.map(q => q.source)).size;
+
+  // Compute per-bridge source count for aggregator coverage indicator
+  const bridgeSourceCount = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    for (const q of quotes) {
+      if (!map.has(q.bridge)) map.set(q.bridge, new Set());
+      map.get(q.bridge)!.add(q.source);
+    }
+    return map;
+  }, [quotes]);
 
   return (
     <div style={{ marginBottom: 28 }}>
@@ -195,7 +223,7 @@ export function RouteExplorer({ asset, tier, selectedRoute }: RouteExplorerProps
           )}
         </div>
 
-        {/* Amount display — tier is USD value; symbol = native of src (HYPE for HL, ETH for ETH, etc.) */}
+        {/* Amount display */}
         <div style={{ width: 200, background: '#12121f', border: '1px solid #1e1e3a', borderRadius: 10, padding: '10px 14px' }}>
           <div style={{ fontSize: 8, color: '#555', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>Quote size</div>
           <div className="flex items-center gap-2">
@@ -231,8 +259,7 @@ export function RouteExplorer({ asset, tier, selectedRoute }: RouteExplorerProps
           <div style={{ flex: 2, fontSize: 8, color: '#555', textTransform: 'uppercase', letterSpacing: 1 }}>Bridge</div>
           <div style={{ flex: 1, fontSize: 8, color: '#555', textTransform: 'uppercase', letterSpacing: 1 }}>Source</div>
           <div style={{ flex: 1.5, fontSize: 8, color: '#555', textTransform: 'uppercase', letterSpacing: 1, textAlign: 'right' }}>You Receive</div>
-          <div style={{ flex: 1, fontSize: 8, color: '#555', textTransform: 'uppercase', letterSpacing: 1, textAlign: 'right' }}>Fee (USD)</div>
-          <div style={{ flex: 1, fontSize: 8, color: '#555', textTransform: 'uppercase', letterSpacing: 1, textAlign: 'right' }}>Gas</div>
+          <div style={{ flex: 1.2, fontSize: 8, color: '#555', textTransform: 'uppercase', letterSpacing: 1, textAlign: 'right' }}>Fee Breakdown</div>
           <div style={{ flex: 1, fontSize: 8, color: '#555', textTransform: 'uppercase', letterSpacing: 1, textAlign: 'center' }}>Est. Time</div>
           <div style={{ flex: 1, fontSize: 8, color: '#555', textTransform: 'uppercase', letterSpacing: 1, textAlign: 'right' }}>Spread</div>
         </div>
@@ -249,6 +276,13 @@ export function RouteExplorer({ asset, tier, selectedRoute }: RouteExplorerProps
         ) : (
           quotes.map((q, i) => {
             const spread = formatSpread(q.spreadBps);
+            const totalFee = parseFloat(q.totalFeeUsd);
+            const gasFee = parseFloat(q.gasCostUsd);
+            const protocolFee = Math.max(totalFee - gasFee, 0);
+            const feeBarTotal = totalFee > 0 ? totalFee : 1;
+            const gasPct = (gasFee / feeBarTotal) * 100;
+            const srcCount = bridgeSourceCount.get(q.bridge)?.size ?? 1;
+
             return (
               <div
                 key={`${q.bridge}-${q.source}-${i}`}
@@ -267,10 +301,17 @@ export function RouteExplorer({ asset, tier, selectedRoute }: RouteExplorerProps
                   {i === 0 ? '\u2605' : `#${i + 1}`}
                 </div>
 
-                {/* Bridge */}
-                <div style={{ flex: 2 }} className="flex items-center gap-2">
-                  <div style={{ width: 8, height: 8, borderRadius: 2, background: getBridgeColor(q.bridge) }} />
-                  <span style={{ fontSize: 12, color: '#e0e0f0', fontWeight: 600 }}>{q.bridge}</span>
+                {/* Bridge + source count */}
+                <div style={{ flex: 2 }}>
+                  <div className="flex items-center gap-2">
+                    <div style={{ width: 8, height: 8, borderRadius: 2, background: getBridgeColor(q.bridge) }} />
+                    <span style={{ fontSize: 12, color: '#e0e0f0', fontWeight: 600 }}>{q.bridge}</span>
+                  </div>
+                  {srcCount > 1 && (
+                    <div style={{ fontSize: 8, color: '#666', marginTop: 2, marginLeft: 18 }}>
+                      {srcCount} sources
+                    </div>
+                  )}
                 </div>
 
                 {/* Source (aggregator) */}
@@ -278,7 +319,7 @@ export function RouteExplorer({ asset, tier, selectedRoute }: RouteExplorerProps
                   <span style={{ fontSize: 9, color: '#888', background: '#1a1a2e', padding: '2px 6px', borderRadius: 3 }}>{q.source}</span>
                 </div>
 
-                {/* Output — primary: USD (quote is $tier in asset), secondary: token amount */}
+                {/* Output */}
                 <div style={{ flex: 1.5, textAlign: 'right' }}>
                   <div style={{ fontSize: 13, color: i === 0 ? '#6CF9D8' : '#e0e0f0', fontWeight: 700 }}>
                     ${parseFloat(q.outputUsd).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -291,14 +332,19 @@ export function RouteExplorer({ asset, tier, selectedRoute }: RouteExplorerProps
                   </div>
                 </div>
 
-                {/* Fee */}
-                <div style={{ flex: 1, textAlign: 'right', fontSize: 11, color: '#888' }}>
-                  ${parseFloat(q.totalFeeUsd).toFixed(2)}
-                </div>
-
-                {/* Gas */}
-                <div style={{ flex: 1, textAlign: 'right', fontSize: 11, color: '#888' }}>
-                  ${parseFloat(q.gasCostUsd).toFixed(2)}
+                {/* Fee breakdown micro-bar */}
+                <div style={{ flex: 1.2, textAlign: 'right' }}>
+                  <div style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>
+                    ${totalFee.toFixed(2)}
+                    <span style={{ fontSize: 9, color: '#555', marginLeft: 4 }}>{q.totalFeeBps}bps</span>
+                  </div>
+                  <div className="flex items-center gap-1" style={{ justifyContent: 'flex-end' }}>
+                    <div style={{ width: 60, height: 5, borderRadius: 3, background: '#1a1a2e', overflow: 'hidden', display: 'flex' }}>
+                      <div style={{ width: `${gasPct}%`, height: '100%', background: '#555' }} title={`Gas: $${gasFee.toFixed(2)}`} />
+                      <div style={{ width: `${100 - gasPct}%`, height: '100%', background: '#F59E0B' }} title={`Protocol: $${protocolFee.toFixed(2)}`} />
+                    </div>
+                    <span style={{ fontSize: 7, color: '#555' }}>gas/proto</span>
+                  </div>
                 </div>
 
                 {/* Time */}
@@ -330,7 +376,101 @@ export function RouteExplorer({ asset, tier, selectedRoute }: RouteExplorerProps
           </span>
         </div>
       </div>
+
+      {/* ═══ HISTORY CHART ═══ */}
+      <div style={{ marginTop: 12 }}>
+        <button
+          type="button"
+          onClick={() => setShowHistory(h => !h)}
+          style={{
+            background: '#1a1a2e', border: '1px solid #2a2a4a', borderRadius: 6,
+            padding: '6px 14px', fontSize: 10, color: showHistory ? '#6CF9D8' : '#888',
+            cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600,
+          }}
+        >
+          {showHistory ? 'Hide History' : 'Show History'}
+        </button>
+
+        {showHistory && (
+          <div style={{ background: '#12121f', border: '1px solid #1e1e3a', borderRadius: 12, padding: 16, marginTop: 8 }}>
+            {/* Period selector */}
+            <div className="flex items-center gap-2" style={{ marginBottom: 12 }}>
+              <span style={{ fontSize: 9, color: '#555', textTransform: 'uppercase', letterSpacing: 1 }}>Period:</span>
+              {(['24h', '7d', '30d'] as const).map(p => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setHistoryPeriod(p)}
+                  style={{
+                    padding: '3px 10px', borderRadius: 4, fontSize: 10, fontWeight: 600,
+                    cursor: 'pointer', border: 'none', fontFamily: 'inherit',
+                    background: historyPeriod === p ? '#6CF9D820' : '#1a1a2e',
+                    color: historyPeriod === p ? '#6CF9D8' : '#666',
+                  }}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+
+            {historyLoading ? (
+              <div style={{ textAlign: 'center', color: '#555', fontSize: 11, padding: 24 }}>Loading history...</div>
+            ) : historyData.length === 0 ? (
+              <div style={{ textAlign: 'center', color: '#555', fontSize: 11, padding: 24 }}>
+                No historical data yet — charts appear after 1+ hours of data collection
+              </div>
+            ) : (
+              <HistoryChart data={historyData} />
+            )}
+          </div>
+        )}
+      </div>
     </div>
+  );
+}
+
+/* ─── History Chart ─── */
+
+function HistoryChart({ data }: { data: HistoryDataPoint[] }) {
+  // Pivot data: each timestamp gets { ts, bridge1_fee, bridge2_fee, ... }
+  const bridges = [...new Set(data.map(d => d.bridge))];
+  const byTime = new Map<string, Record<string, number>>();
+  for (const d of data) {
+    if (!byTime.has(d.ts)) byTime.set(d.ts, { ts: new Date(d.ts).getTime() } as unknown as Record<string, number>);
+    byTime.get(d.ts)![d.bridge] = d.avgFeeBps;
+  }
+  const chartData = Array.from(byTime.values());
+
+  return (
+    <ResponsiveContainer width="100%" height={240}>
+      <LineChart data={chartData}>
+        <XAxis
+          dataKey="ts"
+          type="number"
+          domain={['dataMin', 'dataMax']}
+          tickFormatter={(v: number) => new Date(v).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          stroke="#333"
+          fontSize={9}
+        />
+        <YAxis stroke="#333" fontSize={9} label={{ value: 'Fee (bps)', angle: -90, position: 'insideLeft', style: { fill: '#555', fontSize: 9 } }} />
+        <Tooltip
+          contentStyle={{ background: '#12121f', border: '1px solid #2a2a4a', borderRadius: 8, fontSize: 10 }}
+          labelFormatter={(v) => new Date(Number(v)).toLocaleString()}
+        />
+        <Legend wrapperStyle={{ fontSize: 9 }} />
+        {bridges.map(b => (
+          <Line
+            key={b}
+            type="monotone"
+            dataKey={b}
+            stroke={BRIDGE_COLORS[b.toLowerCase()] ?? '#555'}
+            dot={false}
+            strokeWidth={2}
+            name={b}
+          />
+        ))}
+      </LineChart>
+    </ResponsiveContainer>
   );
 }
 

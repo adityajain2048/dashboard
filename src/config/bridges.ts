@@ -241,14 +241,204 @@ export const BUNGEE_BRIDGE_MAP: Record<string, string> = {
   'arbitrum-bridge':         'arbitrum-bridge',
 };
 
+// ─── Rubic bridge name mapping ───
+export const RUBIC_BRIDGE_MAP: Record<string, string> = {
+  'symbiosis':       'symbiosis',
+  'across':          'across',
+  'stargate':        'stargate',
+  'debridge':        'debridge',
+  'relay':           'relay',
+  'celer_bridge':    'cbridge',
+  'cbridge':         'cbridge',
+  'orbiter':         'orbiter',
+  'hop':             'hop',
+  'meson':           'meson',
+  'mayan':           'mayan',
+  'allbridge':       'allbridge',
+  'wormhole':        'wormhole',
+  'chainflip':       'chainflip',
+  'thorswap':        'thorchain',
+  'thorchain':       'thorchain',
+  'cctp':            'cctp',
+  'hyperlane':       'hyperlane',
+  'squid':           'squid',
+  'multichain':      'multichain',
+  'synapse':         'synapse',
+  'bridgers':        'bridgers',
+  'changenow':       'changenow',
+  'via_protocol':    'via',
+  'rocketpool':      'rocketpool',
+  'lifi':            'lifi',   // dedup handled upstream
+  'rango':           'rango',  // dedup handled upstream
+};
+
+// ─── Catch-all slug normalization ───
+// Maps all known variant slugs (from any source) to canonical bridge IDs.
+// Applied as a fallback after aggregator-specific maps.
+export const SLUG_ALIASES: Record<string, string> = {
+  // Stargate variants
+  'stargatev2':                'stargate',
+  'stargate-v2':               'stargate',
+  'stargatev2bus':             'stargate',
+  'stargate v2':               'stargate',
+  'stargate v2 aggregator':    'stargate',
+  'stargate_v2':               'stargate',
+  'stargatebus':               'stargate',
+  'stargate aggregator':       'stargate',
+  // Relay variants
+  'relaydepository':           'relay',
+  'relay_bridge':              'relay',
+  'relay-bridge':              'relay',
+  'relaybridge':               'relay',
+  // Across variants
+  'acrossv2':                  'across',
+  'across-v2':                 'across',
+  'across_v2':                 'across',
+  'across aggregator':         'across',
+  // deBridge variants
+  'debridge-dln':              'debridge',
+  'dln':                       'debridge',
+  'debridgedln':               'debridge',
+  'debridge dln':              'debridge',
+  // cBridge / Celer variants
+  'celer':                     'cbridge',
+  'celer_bridge':              'cbridge',
+  'celercbridge':              'cbridge',
+  'celer-cbridge':             'cbridge',
+  // Hop variants
+  'hop-protocol':              'hop',
+  'hopprotocol':               'hop',
+  // Symbiosis variants
+  'symbiosisbridge':           'symbiosis',
+  'symbiosis-bridge':          'symbiosis',
+  // Mayan variants
+  'mayanfinance':              'mayan',
+  'mayan-finance':             'mayan',
+  'mayan finance':             'mayan',
+  // Orbiter variants
+  'orbiterfinance':            'orbiter',
+  'orbiter-finance':           'orbiter',
+  'orbiter finance':           'orbiter',
+  // Wormhole variants
+  'portalbridge':              'wormhole',
+  'portal':                    'wormhole',
+  'wormhole-bridge':           'wormhole',
+  // THORChain variants
+  'thorswap':                  'thorchain',
+  'thor':                      'thorchain',
+  'thorchain-dex':             'thorchain',
+  // Everclear / Connext
+  'connext':                   'everclear',
+  'connextbridge':             'everclear',
+  'connext-bridge':            'everclear',
+  // CCTP variants
+  'cctp-aggregator':           'cctp',
+  'circle-cctp':               'cctp',
+  'circlecctp':                'cctp',
+  'cctp aggregator':           'cctp',
+  'circle cctp':               'cctp',
+  // Allbridge
+  'allbridgecore':             'allbridge',
+  'allbridge-core':            'allbridge',
+  // Synapse
+  'synapsebridge':             'synapse',
+  'synapse-bridge':            'synapse',
+  // Hyperlane
+  'hyperlane-bridge':          'hyperlane',
+  // Native bridges
+  'arbitrumbridge':            'arbitrum-bridge',
+  'optimismbridge':            'optimism-bridge',
+  'mantlebridge':              'mantle-native-bridge',
+  // Meson
+  'mesonfi':                   'meson',
+  'meson-fi':                  'meson',
+  // GasZip
+  'gas-zip':                   'gaszip',
+  'gas_zip':                   'gaszip',
+  // Variants seen in live aggregator data
+  'orbiter aggregator':        'orbiter',
+  'orbiterv2':                 'orbiter',
+  'mayanfastmctp':             'mayan',
+  'mayan fast mctp':           'mayan',
+  'mayanswift':                'mayan',
+  'cctp-v2':                   'cctp',
+  'cctp-v2-fast':              'cctp',
+  'cctpv2':                    'cctp',
+  'circle cctp v2 economy':    'cctp',
+  'circle cctp v2':            'cctp',
+  'circlecctpv2':              'cctp',
+  'stargatev2 economy':        'stargate',
+  'stargatev2bus economy':     'stargate',
+  'bridgers aggregator':       'bridgers',
+  'near':                      'near',
+  'glacis':                    'glacis',
+  'polymerstandard':           'polymer',
+  'polymer':                   'polymer',
+  'eco':                       'eco',
+};
+
+/** Normalize any bridge slug to its canonical form.
+ *  Checks canonical IDs first, then SLUG_ALIASES. */
+export function normalizeBridge(slug: string): string {
+  if (!slug) return slug;
+  const lower = slug.toLowerCase().trim();
+  if (BRIDGES[lower]) return lower;
+  if (SLUG_ALIASES[lower]) return SLUG_ALIASES[lower]!;
+  return lower;
+}
+
 /** Resolve aggregator bridge name → canonical bridge ID. Returns null if unknown. */
 export function resolveBridgeName(aggregator: AggregatorId, rawName: string): string | null {
-  const lower = rawName.toLowerCase();
+  const lower = rawName.toLowerCase().trim();
   const map = aggregator === 'lifi' ? LIFI_BRIDGE_MAP
     : aggregator === 'rango' ? RANGO_BRIDGE_MAP
     : aggregator === 'bungee' ? BUNGEE_BRIDGE_MAP
+    : aggregator === 'rubic' ? RUBIC_BRIDGE_MAP
     : null;
 
-  if (!map) return lower; // Rubic: use raw provider name
-  return map[rawName] ?? map[lower] ?? null;
+  if (!map) return normalizeBridge(lower);
+  const resolved = map[rawName] ?? map[lower] ?? null;
+  // Fallback to slug aliases if aggregator map didn't match
+  return resolved ?? normalizeBridge(lower);
+}
+
+// ═══════════════════════════════════════════
+// BRIDGE CHAIN SUPPORT
+// ═══════════════════════════════════════════
+// Which chains each bridge actually supports, based on their APIs and docs.
+// Used to compute actual route coverage (theoretical max routes per bridge).
+
+const ALL_EVM: readonly string[] = [
+  'ethereum', 'bsc', 'avalanche', 'polygon', 'sonic', 'berachain',
+  'arbitrum', 'optimism', 'base', 'scroll', 'linea', 'zksync',
+  'mantle', 'hyperliquid', 'abstract', 'unichain', 'monad', 'megaeth',
+];
+
+const ALL_CHAINS: readonly string[] = [...ALL_EVM, 'solana', 'bitcoin'];
+
+export const BRIDGE_SUPPORTED_CHAINS: Record<string, readonly string[]> = {
+  across:    ALL_EVM,
+  stargate:  ['ethereum', 'arbitrum', 'optimism', 'polygon', 'base', 'bsc', 'avalanche', 'scroll', 'linea', 'mantle', 'sonic'],
+  relay:     ALL_EVM,
+  debridge:  ALL_EVM,
+  symbiosis: ALL_EVM,
+  hop:       ['ethereum', 'arbitrum', 'optimism', 'polygon', 'base', 'linea', 'zksync'],
+  cbridge:   ALL_EVM,
+  orbiter:   ['ethereum', 'arbitrum', 'optimism', 'base', 'polygon', 'bsc', 'linea', 'zksync', 'scroll', 'mantle'],
+  mayan:     ALL_CHAINS,
+  meson:     ALL_CHAINS,
+  everclear: ['ethereum', 'arbitrum', 'optimism', 'base', 'polygon', 'bsc', 'linea', 'mantle'],
+  thorchain: ['ethereum', 'bsc', 'avalanche', 'bitcoin'],
+  wormhole:  ['ethereum', 'arbitrum', 'optimism', 'base', 'polygon', 'bsc', 'avalanche', 'solana'],
+  cctp:      ['ethereum', 'arbitrum', 'optimism', 'base', 'polygon', 'avalanche'],
+  allbridge: ['ethereum', 'arbitrum', 'optimism', 'base', 'polygon', 'bsc', 'avalanche', 'solana'],
+  chainflip: ['ethereum', 'arbitrum', 'bitcoin', 'solana'],
+  garden:    ['ethereum', 'arbitrum', 'bitcoin'],
+};
+
+/** Compute the number of possible directional routes for a bridge */
+export function getBridgeMaxRoutes(bridgeId: string): number {
+  const chains = BRIDGE_SUPPORTED_CHAINS[bridgeId];
+  if (!chains) return 0;
+  return chains.length * (chains.length - 1); // directional pairs
 }
