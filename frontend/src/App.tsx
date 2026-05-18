@@ -6,6 +6,7 @@ import { RouteExplorer } from './views/RouteExplorer';
 import { Heatmap } from './views/Heatmap';
 import { Bridges } from './views/Bridges';
 import { Opportunities } from './views/Opportunities';
+import { RelayReport } from './views/RelayReport';
 import { HEATMAP_ORDER } from './config/chains';
 
 const ASSETS = ['ETH', 'USDC', 'USDT'] as const;
@@ -15,12 +16,13 @@ const TIERS: Array<{ key: number; label: string }> = [
   { key: 50000, label: '$50K' },
 ];
 
-type Tab = 'explorer' | 'matrix' | 'bridges' | 'insights';
+type Tab = 'explorer' | 'matrix' | 'bridges' | 'insights' | 'relay';
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: 'explorer', label: 'Explorer' },
   { key: 'matrix', label: 'Matrix' },
   { key: 'bridges', label: 'Bridges' },
   { key: 'insights', label: 'Insights' },
+  { key: 'relay', label: 'Relay Intel' },
 ];
 
 interface HealthData {
@@ -216,6 +218,10 @@ function App() {
 
         {activeTab === 'insights' && (
           <Opportunities onRouteClick={handleRouteClick} />
+        )}
+
+        {activeTab === 'relay' && (
+          <RelayReport />
         )}
 
       </div>
