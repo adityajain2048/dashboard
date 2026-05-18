@@ -3,6 +3,7 @@
   "outputDirectory": "dist",
   "framework": "vite",
   "rewrites": [
+    { "source": "/api/(.*)", "destination": "https://bridge-dashboard.blackmeadow-8da7a938.japaneast.azurecontainerapps.io/api/$1" },
     { "source": "/(.*)", "destination": "/" }
   ]
 }
