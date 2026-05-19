@@ -41,22 +41,38 @@ const COMMON_MIGRATIONS = [
   '004_route_latest_input_amount.sql',
 ];
 
+async function isDbReadOnly(): Promise<boolean> {
+  const client = await pool.connect();
+  try {
+    const res = await client.query('SHOW transaction_read_only');
+    return res.rows[0]?.transaction_read_only === 'on';
+  } catch {
+    return false;
+  } finally {
+    client.release();
+  }
+}
+
 async function runMigrations(): Promise<void> {
+  // If DB is read-only (storage full, replica, etc.) skip migrations entirely.
+  // Tables already exist from previous successful runs — app can still serve.
+  if (await isDbReadOnly()) {
+    logger.warn('Database is in read-only mode — skipping migrations (existing schema assumed)');
+    return;
+  }
+
   const edition = await detectTimescaleDB();
 
   const files = await readdir(MIGRATIONS_DIR);
   let sqlFiles: string[];
 
   if (edition === 'tsl') {
-    // Full TimescaleDB with Timescale License — use full schema (hypertables + continuous aggregates + compression)
     sqlFiles = ['001_init.sql', ...COMMON_MIGRATIONS].filter((f) => files.includes(f));
     logger.info('TimescaleDB (TSL) detected — using full schema');
   } else if (edition === 'apache') {
-    // TimescaleDB Apache/community edition — hypertables yes, but no continuous aggregates/compression/retention
     sqlFiles = ['001_init_community.sql', ...COMMON_MIGRATIONS].filter((f) => files.includes(f));
     logger.info('TimescaleDB (Apache/community) detected — using community schema (hypertables only, no continuous aggregates)');
   } else {
-    // No TimescaleDB — plain PostgreSQL tables
     sqlFiles = ['000_init_plain.sql', ...COMMON_MIGRATIONS].filter((f) => files.includes(f));
     logger.warn('TimescaleDB NOT available — using plain PostgreSQL schema (no hypertables)');
   }
@@ -68,10 +84,26 @@ async function runMigrations(): Promise<void> {
 
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    // CREATE EXTENSION cannot run inside a transaction block — run extension statements first
+    const extensionRe = /^\s*CREATE\s+EXTENSION\b[^;]*;/gim;
+    const extensionStatements: string[] = [];
+    const strippedSqls: { file: string; sql: string }[] = [];
+
     for (const file of sqlFiles) {
       const path = join(MIGRATIONS_DIR, file);
-      const sql = await readFile(path, 'utf-8');
+      const raw = await readFile(path, 'utf-8');
+      const exts: string[] = [];
+      const stripped = raw.replace(extensionRe, (m) => { exts.push(m); return ''; });
+      extensionStatements.push(...exts);
+      strippedSqls.push({ file, sql: stripped });
+    }
+
+    for (const stmt of extensionStatements) {
+      await client.query(stmt);
+    }
+
+    await client.query('BEGIN');
+    for (const { file, sql } of strippedSqls) {
       logger.info({ file }, 'Running migration');
       await client.query(sql);
     }
@@ -79,6 +111,12 @@ async function runMigrations(): Promise<void> {
     logger.info({ count: sqlFiles.length, files: sqlFiles }, 'Migrations completed');
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
+    // PG error 25006 = read-only transaction — don't crash, schema likely exists
+    const pgErr = err as { code?: string };
+    if (pgErr.code === '25006') {
+      logger.warn('Migration hit read-only error — continuing with existing schema');
+      return;
+    }
     throw err;
   } finally {
     client.release();

@@ -149,7 +149,9 @@ export default async function bridgesRoutes(
       const routesCovered = parseInt(r.routes_covered, 10);
       const wins = winsMap.get(id) ?? 0;
       const supportedChains = BRIDGE_SUPPORTED_CHAINS[id] ?? [];
-      const maxRoutes = getBridgeMaxRoutes(id);
+      const configMaxRoutes = getBridgeMaxRoutes(id);
+      // Use whichever is larger — config or actual — so coverage never exceeds 100%
+      const maxRoutes = Math.max(configMaxRoutes, routesCovered);
       return {
         id,
         name: getBridgeDisplayName(id),

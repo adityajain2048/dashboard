@@ -389,7 +389,7 @@ export async function insertFetchLog(entry: FetchLogEntry): Promise<void> {
 /** Health check: quote count and oldest quote timestamp. */
 export async function getHealth(): Promise<{ quoteCount: number; oldestQuote: Date | null }> {
   const result = await query<{ count: string; min_ts: Date | null }>(
-    'SELECT COUNT(*)::text AS count, MIN(ts) AS min_ts FROM quotes'
+    "SELECT COUNT(*)::text AS count, MIN(ts) AS min_ts FROM quotes WHERE ts > NOW() - INTERVAL '24 hours'"
   );
   const row = result.rows[0];
   return {

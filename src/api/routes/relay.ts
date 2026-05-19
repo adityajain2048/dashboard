@@ -100,9 +100,10 @@ export default async function relayRoutes(
     const totalRoutes = wins + losses;
     const winRate = totalRoutes > 0 ? Math.round(wins / totalRoutes * 1000) / 10 : 0;
 
-    // Coverage gaps
+    // Coverage gaps — use config chains but ensure maxRoutes >= actual corridors
     const relayChains = BRIDGE_SUPPORTED_CHAINS['relay'] ?? [];
-    const maxRoutes = relayChains.length * (relayChains.length - 1);
+    const configMaxRoutes = relayChains.length * (relayChains.length - 1);
+    const maxRoutes = Math.max(configMaxRoutes, relayCorridors);
     const activeChainPairs = new Set(matrixRes.rows.map(r => `${r.src_chain}:${r.dst_chain}`));
     const coverageGaps: string[] = [];
     for (const src of relayChains) {

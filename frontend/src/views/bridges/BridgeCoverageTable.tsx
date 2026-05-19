@@ -38,7 +38,6 @@ export function BridgeCoverageTable({ bridges, health, totalActiveRoutes }: Prop
   };
 
   const visibleRows = showAll ? sorted : sorted.slice(0, DEFAULT_ROWS);
-  const maxRoutes = Math.max(...bridges.map(b => b.routesCovered), 1);
 
   return (
     <div style={{ background: '#12121f', border: '1px solid #1e1e3a', borderRadius: 10, overflow: 'hidden' }}>

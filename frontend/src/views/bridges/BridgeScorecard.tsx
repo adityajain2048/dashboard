@@ -7,7 +7,7 @@ interface Props {
   totalActiveRoutes: number;
 }
 
-export function BridgeScorecard({ bridges, health, totalActiveRoutes }: Props) {
+export function BridgeScorecard({ bridges, health, totalActiveRoutes: _totalActiveRoutes }: Props) {
   const healthMap = new Map(health.map(h => [h.id, h]));
 
   // Only show bridges with some activity
