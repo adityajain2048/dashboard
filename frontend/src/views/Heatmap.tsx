@@ -88,10 +88,11 @@ export function Heatmap({ asset, tier, onCellClick }: HeatmapProps) {
   const cellSize = 36;
   const rowHeaderWidth = 72;
 
-  /** Clamp display value — hide anomalous outliers (e.g. -2467986) */
+  /** Format fee in %. Negative = bridge gives rebate (show as 0.0). Hide extreme outliers. */
   function formatCellValue(bps: number | null): string {
     if (bps == null) return '—';
-    if (bps < 0 || bps > 9999) return '—';
+    if (bps > 9999) return '—';
+    if (bps < 0) return '0.0';
     return (bps / 100).toFixed(1);
   }
 
