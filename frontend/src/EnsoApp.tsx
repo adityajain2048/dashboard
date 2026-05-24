@@ -21,6 +21,7 @@ import { ActionCoverage } from './enso/views/ActionCoverage';
 import { StandardsBreakdown } from './enso/views/StandardsBreakdown';
 import { ProtocolCatalog } from './enso/views/ProtocolCatalog';
 import { CoverageGaps } from './enso/views/CoverageGaps';
+import { VolumeLeaderboard } from './enso/views/VolumeLeaderboard';
 
 interface DashboardData {
   protocols: EnrichedProtocol[];
@@ -179,6 +180,8 @@ export function EnsoApp() {
       {/* Content */}
       <div style={{ maxWidth: 1440, margin: '0 auto', padding: '28px 32px' }}>
         <HeroStats protocols={data.protocols} networks={data.networks} actions={data.actions} standards={data.standardEntries} />
+
+        <VolumeLeaderboard protocols={data.protocols} />
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20 }}>
           <CategoryBreakdown protocols={data.protocols} />
