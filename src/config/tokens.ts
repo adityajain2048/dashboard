@@ -97,6 +97,188 @@ export const TOKENS: readonly TokenEntry[] = [
   { chain: 'megaeth',   asset: 'USDC', address: 'none', decimals: 0, notes: 'No Circle USDC; MegaETH uses USDm (Ethena) as primary stable' },
   { chain: 'megaeth',   asset: 'USDT', address: '0xb8ce59fc3717ada4c02eadf9682a9e934f625ebb', decimals: 6, notes: 'USDT0 via LayerZero OFT' },
 
+  // ─── Blast (81457) — Squid-supported ───
+  { chain: 'blast',      asset: 'ETH',  address: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', decimals: 18 },
+  { chain: 'blast',      asset: 'USDC', address: 'none', decimals: 0, notes: 'No USDC on Blast via Squid' },
+  { chain: 'blast',      asset: 'USDT', address: 'none', decimals: 0, notes: 'No USDT on Blast via Squid' },
+
+  // ─── Celo (42220) ───
+  { chain: 'celo',       asset: 'ETH',  address: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', decimals: 18, notes: 'CELO native' },
+  { chain: 'celo',       asset: 'USDC', address: '0xceBa9300f2b948710d2653dD7b07f33A8B32118C', decimals: 6 },
+  { chain: 'celo',       asset: 'USDT', address: '0x48065fbbe25f71C9282ddf5e1cD6D6A887483D5e', decimals: 6 },
+
+  // ─── Fantom (250) ───
+  { chain: 'fantom',     asset: 'ETH',  address: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', decimals: 18, notes: 'FTM native' },
+  { chain: 'fantom',     asset: 'USDC', address: '0x28a92dde19D9989F39A49905d7C9C2FAc7799bDF', decimals: 6, notes: 'lzUSDC bridged' },
+  { chain: 'fantom',     asset: 'USDT', address: 'none', decimals: 0, notes: 'No USDT via Squid on Fantom' },
+
+  // ─── Fraxtal (252) ───
+  { chain: 'fraxtal',    asset: 'ETH',  address: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', decimals: 18, notes: 'frxETH native' },
+  { chain: 'fraxtal',    asset: 'USDC', address: 'none', decimals: 0, notes: 'No USDC via Squid on Fraxtal' },
+  { chain: 'fraxtal',    asset: 'USDT', address: 'none', decimals: 0, notes: 'No USDT via Squid on Fraxtal' },
+
+  // ─── Gnosis (100) ───
+  { chain: 'gnosis',     asset: 'ETH',  address: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', decimals: 18, notes: 'xDAI native' },
+  { chain: 'gnosis',     asset: 'USDC', address: '0xDDAfbb505ad214D7b80b1f830fcCc89B60fb7A83', decimals: 6 },
+  { chain: 'gnosis',     asset: 'USDT', address: '0x4ECaBa5870353805a9F068101A40E0f32eD605C6', decimals: 6 },
+
+  // ─── Hedera (295) ───
+  { chain: 'hedera',     asset: 'ETH',  address: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', decimals: 8, notes: 'HBAR native (8 decimals)' },
+  { chain: 'hedera',     asset: 'USDC', address: '0x000000000000000000000000000000000006f89a', decimals: 6 },
+  { chain: 'hedera',     asset: 'USDT', address: 'none', decimals: 0, notes: 'No USDT via Squid on Hedera' },
+
+  // ─── Filecoin (314) ───
+  { chain: 'filecoin',   asset: 'ETH',  address: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', decimals: 18, notes: 'FIL native' },
+  { chain: 'filecoin',   asset: 'USDC', address: 'none', decimals: 0, notes: 'No USDC via Squid on Filecoin' },
+  { chain: 'filecoin',   asset: 'USDT', address: 'none', decimals: 0, notes: 'No USDT via Squid on Filecoin' },
+
+  // ─── Immutable zkEVM (13371) ───
+  { chain: 'immutable',  asset: 'ETH',  address: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', decimals: 18, notes: 'IMX native' },
+  { chain: 'immutable',  asset: 'USDC', address: '0x6de8aCC0D406837030CE4dd28e7c08C5a96a30d2', decimals: 6 },
+  { chain: 'immutable',  asset: 'USDT', address: '0x68bCC7F1190AF20E7b572BCFb431c3ac10A936Ab', decimals: 6 },
+
+  // ─── Kava EVM (2222) ───
+  { chain: 'kava',       asset: 'ETH',  address: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', decimals: 18, notes: 'KAVA native' },
+  { chain: 'kava',       asset: 'USDC', address: 'none', decimals: 0, notes: 'No USDC via Squid on Kava EVM' },
+  { chain: 'kava',       asset: 'USDT', address: 'none', decimals: 0, notes: 'No USDT via Squid on Kava EVM' },
+
+  // ─── Moonbeam (1284) ───
+  { chain: 'moonbeam',   asset: 'ETH',  address: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', decimals: 18, notes: 'GLMR native' },
+  { chain: 'moonbeam',   asset: 'USDC', address: 'none', decimals: 0, notes: 'No USDC via Squid on Moonbeam' },
+  { chain: 'moonbeam',   asset: 'USDT', address: 'none', decimals: 0, notes: 'No USDT via Squid on Moonbeam' },
+
+  // ─── Peaq (3338) ───
+  { chain: 'peaq',       asset: 'ETH',  address: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', decimals: 18, notes: 'PEAQ native' },
+  { chain: 'peaq',       asset: 'USDC', address: '0xbba60dA06c2C5424f03f7434542280FCAD453D10', decimals: 6 },
+  { chain: 'peaq',       asset: 'USDT', address: '0xf4d9235269a96aAdaFc9adAE454a0618eBe37949', decimals: 6 },
+
+  // ─── Soneium (1868) ───
+  { chain: 'soneium',    asset: 'ETH',  address: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', decimals: 18 },
+  { chain: 'soneium',    asset: 'USDC', address: 'none', decimals: 0, notes: 'No USDC via Squid on Soneium yet' },
+  { chain: 'soneium',    asset: 'USDT', address: '0x3A337a6ada9d885B6AD95eC48F9b75F197b5AE35', decimals: 6 },
+
+  // ─── Sui ───
+  { chain: 'sui',        asset: 'ETH',  address: '0x0000000000000000000000000000000000000000000000000000000000000002::sui::SUI', decimals: 9, notes: 'SUI native (mapped to ETH slot)' },
+  { chain: 'sui',        asset: 'USDC', address: 'none', decimals: 0, notes: 'No USDC on Sui via Squid' },
+  { chain: 'sui',        asset: 'USDT', address: 'none', decimals: 0, notes: 'No USDT on Sui via Squid' },
+
+  // ─── Cosmos IBC chains — USDC/USDT addresses are IBC denoms from Squid token list ───
+
+  // Osmosis (osmosis-1)
+  { chain: 'osmosis',    asset: 'ETH',  address: 'none', decimals: 0,  notes: 'No ETH on Osmosis via Squid' },
+  { chain: 'osmosis',    asset: 'USDC', address: 'ibc/498A0751C798A0D9A389AA3691123DADA57DAA4FE165D5C75894505B876BA6E4', decimals: 6 },
+  { chain: 'osmosis',    asset: 'USDT', address: 'ibc/4ABBEF4C8926DDDB320AE5188CFD63267ABBCEFC0583E4AE05D6E5AA2401DDAB', decimals: 6 },
+
+  // Noble (noble-1) — canonical USDC issuance chain
+  { chain: 'noble',      asset: 'ETH',  address: 'none', decimals: 0,  notes: 'No ETH on Noble' },
+  { chain: 'noble',      asset: 'USDC', address: 'uusdc', decimals: 6, notes: 'Native Circle USDC on Noble' },
+  { chain: 'noble',      asset: 'USDT', address: 'none', decimals: 0,  notes: 'No USDT on Noble' },
+
+  // Neutron (neutron-1)
+  { chain: 'neutron',    asset: 'ETH',  address: 'none', decimals: 0,  notes: 'No ETH on Neutron via Squid' },
+  { chain: 'neutron',    asset: 'USDC', address: 'ibc/B559A80D62249C8AA07A380E2A2BEA6E5CA9A6F079C912C3A9E9B494105E4F81', decimals: 6 },
+  { chain: 'neutron',    asset: 'USDT', address: 'none', decimals: 0,  notes: 'No USDT on Neutron via Squid' },
+
+  // DYDX (dydx-mainnet-1)
+  { chain: 'dydx',       asset: 'ETH',  address: 'none', decimals: 0,  notes: 'No ETH on DYDX via Squid' },
+  { chain: 'dydx',       asset: 'USDC', address: 'ibc/8E27BA2D5493AF5636760E354E46004562C46AB7EC0CC4C1CA14E9E20E2545B5', decimals: 6 },
+  { chain: 'dydx',       asset: 'USDT', address: 'none', decimals: 0,  notes: 'No USDT on DYDX via Squid' },
+
+  // Sei (pacific-1)
+  { chain: 'sei',        asset: 'ETH',  address: 'none', decimals: 0,  notes: 'No ETH on Sei via Squid' },
+  { chain: 'sei',        asset: 'USDC', address: 'ibc/CA6FBFAF399474A06263E10D0CE5AEBBE15189D6D4B2DD9ADE61007E68EB9DB0', decimals: 6, notes: 'Noble USDC via IBC' },
+  { chain: 'sei',        asset: 'USDT', address: 'ibc/6C00E4AA0CC7618370F81F7378638AE6C48EFF8C9203CE1C2357012B440EBDB7', decimals: 6 },
+
+  // Cosmos Hub (cosmoshub-4)
+  { chain: 'cosmoshub',  asset: 'ETH',  address: 'none', decimals: 0,  notes: 'No ETH on Cosmos Hub via Squid' },
+  { chain: 'cosmoshub',  asset: 'USDC', address: 'ibc/F663521BF1836B00F5F177680F74BFB9A8B5654A694D0D2BC249E03CF2509013', decimals: 6 },
+  { chain: 'cosmoshub',  asset: 'USDT', address: 'none', decimals: 0,  notes: 'No USDT on Cosmos Hub via Squid' },
+
+  // Kujira (kaiyo-1)
+  { chain: 'kujira',     asset: 'ETH',  address: 'none', decimals: 0,  notes: 'No ETH on Kujira via Squid' },
+  { chain: 'kujira',     asset: 'USDC', address: 'ibc/FE98AAD68F02F03565E9FA39A5E627946699B2B07115889ED812D8BA639576A9', decimals: 6 },
+  { chain: 'kujira',     asset: 'USDT', address: 'none', decimals: 0,  notes: 'No USDT on Kujira via Squid' },
+
+  // Terra (phoenix-1)
+  { chain: 'terra',      asset: 'ETH',  address: 'none', decimals: 0,  notes: 'No ETH on Terra via Squid' },
+  { chain: 'terra',      asset: 'USDC', address: 'ibc/2C962DAB9F57FE0921435426AE75196009FAA1981BF86991203C8411F8980FDB', decimals: 6 },
+  { chain: 'terra',      asset: 'USDT', address: 'none', decimals: 0,  notes: 'No USDT on Terra via Squid' },
+
+  // Injective (injective-1) — uses .axl suffix for Axelar-bridged assets
+  { chain: 'injective',  asset: 'ETH',  address: 'none', decimals: 0,  notes: 'No ETH on Injective via Squid (axlETH available but not tracked)' },
+  { chain: 'injective',  asset: 'USDC', address: 'ibc/7E1AF94AD246BE522892751046F0C959B768642E5671CC3742264068D49553C0', decimals: 6, notes: 'USDC.axl' },
+  { chain: 'injective',  asset: 'USDT', address: 'ibc/90C6F06139D663CFD7949223D257C5B5D241E72ED61EBD12FFDDA6F068715E47', decimals: 6, notes: 'USDT.axl' },
+
+  // Stargaze (stargaze-1)
+  { chain: 'stargaze',   asset: 'ETH',  address: 'none', decimals: 0,  notes: 'No ETH on Stargaze via Squid' },
+  { chain: 'stargaze',   asset: 'USDC', address: 'ibc/4A482FA914A4B9B05801ED81C33713899F322B24F76A06F4B8FE872485EA22FF', decimals: 6 },
+  { chain: 'stargaze',   asset: 'USDT', address: 'none', decimals: 0,  notes: 'No USDT on Stargaze via Squid' },
+
+  // Juno (juno-1)
+  { chain: 'juno',       asset: 'ETH',  address: 'none', decimals: 0,  notes: 'No ETH on Juno via Squid' },
+  { chain: 'juno',       asset: 'USDC', address: 'ibc/4A1C18CA7F50544760CF306189B810CE4C1CB156C7FC870143D401FE7280E591', decimals: 6 },
+  { chain: 'juno',       asset: 'USDT', address: 'none', decimals: 0,  notes: 'No USDT on Juno via Squid' },
+
+  // Axelar (axelar-dojo-1)
+  { chain: 'axelar',     asset: 'ETH',  address: 'none', decimals: 0,  notes: 'No ETH tracking on Axelar chain itself' },
+  { chain: 'axelar',     asset: 'USDC', address: 'none', decimals: 0,  notes: 'No direct USDC IBC on Axelar via Squid' },
+  { chain: 'axelar',     asset: 'USDT', address: 'none', decimals: 0,  notes: 'No USDT on Axelar via Squid' },
+
+  // Celestia (celestia)
+  { chain: 'celestia',   asset: 'ETH',  address: 'none', decimals: 0,  notes: 'No ETH on Celestia via Squid' },
+  { chain: 'celestia',   asset: 'USDC', address: 'none', decimals: 0,  notes: 'No USDC on Celestia via Squid' },
+  { chain: 'celestia',   asset: 'USDT', address: 'none', decimals: 0,  notes: 'No USDT on Celestia via Squid' },
+
+  // Dymension (dymension_1100-1)
+  { chain: 'dymension',  asset: 'ETH',  address: 'none', decimals: 0,  notes: 'No ETH on Dymension via Squid' },
+  { chain: 'dymension',  asset: 'USDC', address: 'ibc/B3504E092456BA618CC28AC671A71FB08C6CA0FD0BE7C8A5B5A3E2DD933CC9E4', decimals: 6 },
+  { chain: 'dymension',  asset: 'USDT', address: 'none', decimals: 0,  notes: 'No USDT on Dymension via Squid' },
+
+  // Stride (stride-1)
+  { chain: 'stride',     asset: 'ETH',  address: 'none', decimals: 0,  notes: 'No ETH on Stride via Squid' },
+  { chain: 'stride',     asset: 'USDC', address: 'none', decimals: 0,  notes: 'No USDC on Stride via Squid' },
+  { chain: 'stride',     asset: 'USDT', address: 'none', decimals: 0,  notes: 'No USDT on Stride via Squid' },
+
+  // Agoric (agoric-3)
+  { chain: 'agoric',     asset: 'ETH',  address: 'none', decimals: 0,  notes: 'No ETH on Agoric via Squid' },
+  { chain: 'agoric',     asset: 'USDC', address: 'ibc/FE98AAD68F02F03565E9FA39A5E627946699B2B07115889ED812D8BA639576A9', decimals: 6 },
+  { chain: 'agoric',     asset: 'USDT', address: 'none', decimals: 0,  notes: 'No USDT on Agoric via Squid' },
+
+  // Akash (akashnet-2)
+  { chain: 'akash',      asset: 'ETH',  address: 'none', decimals: 0,  notes: 'No ETH on Akash via Squid' },
+  { chain: 'akash',      asset: 'USDC', address: 'none', decimals: 0,  notes: 'No USDC on Akash via Squid' },
+  { chain: 'akash',      asset: 'USDT', address: 'none', decimals: 0,  notes: 'No USDT on Akash via Squid' },
+
+  // Archway (archway-1)
+  { chain: 'archway',    asset: 'ETH',  address: 'none', decimals: 0,  notes: 'No ETH on Archway via Squid' },
+  { chain: 'archway',    asset: 'USDC', address: 'ibc/43897B9739BD63E3A08A88191999C632E052724AB96BD4C74AE31375C991F48D', decimals: 6 },
+  { chain: 'archway',    asset: 'USDT', address: 'none', decimals: 0,  notes: 'No USDT on Archway via Squid' },
+
+  // Xion (xion-mainnet-1)
+  { chain: 'xion',       asset: 'ETH',  address: 'none', decimals: 0,  notes: 'No ETH on Xion via Squid' },
+  { chain: 'xion',       asset: 'USDC', address: 'ibc/F082B65C88E4B6D5EF1DB243CDA1D331D002759E938A0F5CD3FFDC5D53B3E349', decimals: 6 },
+  { chain: 'xion',       asset: 'USDT', address: 'none', decimals: 0,  notes: 'No USDT on Xion via Squid' },
+
+  // Elys (elys-1)
+  { chain: 'elys',       asset: 'ETH',  address: 'none', decimals: 0,  notes: 'No ETH on Elys via Squid' },
+  { chain: 'elys',       asset: 'USDC', address: 'ibc/F082B65C88E4B6D5EF1DB243CDA1D331D002759E938A0F5CD3FFDC5D53B3E349', decimals: 6 },
+  { chain: 'elys',       asset: 'USDT', address: 'none', decimals: 0,  notes: 'No USDT on Elys via Squid' },
+
+  // Persistence (core-1)
+  { chain: 'persistence',asset: 'ETH',  address: 'none', decimals: 0,  notes: 'No ETH on Persistence via Squid' },
+  { chain: 'persistence',asset: 'USDC', address: 'ibc/B3792E4A62DF4A934EF2DF5968556DB56F5776ED25BDE11188A4F58A7DD406F0', decimals: 6 },
+  { chain: 'persistence',asset: 'USDT', address: 'ibc/C559977F5797BDC1D74C0836A10C379C991D664166CB60D776A83029852431B4', decimals: 6 },
+
+  // Saga (ssc-1)
+  { chain: 'saga',       asset: 'ETH',  address: 'none', decimals: 0,  notes: 'No ETH on Saga via Squid' },
+  { chain: 'saga',       asset: 'USDC', address: 'ibc/37EF240838413BD7D3496183213F7F0F483EC7A330328F16AD901A1AC1450F72', decimals: 6 },
+  { chain: 'saga',       asset: 'USDT', address: 'ibc/B5F6DCC4FEF6BBBC356C67C46072AB3C01443FB5E3D19538C52A3CD439BE6BE3', decimals: 6 },
+
+  // Migaloo (migaloo-1)
+  { chain: 'migaloo',    asset: 'ETH',  address: 'none', decimals: 0,  notes: 'No ETH on Migaloo via Squid' },
+  { chain: 'migaloo',    asset: 'USDC', address: 'ibc/BC5C0BAFD19A5E4133FDA0F3E04AE1FBEE75A4A226554B2CBB021089FF2E1F8A', decimals: 6 },
+  { chain: 'migaloo',    asset: 'USDT', address: 'none', decimals: 0,  notes: 'No USDT on Migaloo via Squid' },
+
   // ─── Solana ───
   { chain: 'solana',    asset: 'ETH',  address: 'So11111111111111111111111111111111111111112', decimals: 9, notes: 'SOL native (mapped to ETH asset for cross-chain context)' },
   { chain: 'solana',    asset: 'USDC', address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6 },

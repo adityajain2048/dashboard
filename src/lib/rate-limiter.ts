@@ -83,6 +83,8 @@ const RATE_LIMITS: Record<AggregatorId, { rpm: number; burst: number; circuitThr
   // Bungee: burst=2 prevents 429 floods on startup; 429s excluded from circuit failures anyway.
   bungee: { rpm: 40,  burst: 2,  circuitThreshold: 15 },
   rubic:  { rpm: 12,  burst: 1,  circuitThreshold: 10 },
+  // Squid: integrator tier — conservative start, same as Bungee. Adjust after observing rate limits.
+  squid:  { rpm: 40,  burst: 2,  circuitThreshold: 15 },
 };
 
 const limiters = new Map<AggregatorId, RateLimiter>();

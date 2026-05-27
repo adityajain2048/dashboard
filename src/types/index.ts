@@ -19,6 +19,8 @@ export interface Chain {
   readonly lifiChainId?: number;
   /** Override for Bungee/Socket API when they use a different chainId than our chainId. */
   readonly bungeeChainId?: number;
+  /** Override for Squid V2 API when they use a different chain identifier (e.g. Solana = "solana-mainnet-beta"). */
+  readonly squidChainId?: string;
 }
 
 // ═══════════════════════════════════════════
@@ -49,7 +51,7 @@ export interface RouteKey {
 // ═══════════════════════════════════════════
 
 export type BridgeApiType = 'rest-get' | 'rest-post' | 'sdk' | 'aggregator-only';
-export type AggregatorId = 'lifi' | 'rango' | 'bungee' | 'rubic';
+export type AggregatorId = 'lifi' | 'rango' | 'bungee' | 'rubic' | 'squid';
 
 export interface BridgeConfig {
   readonly id: string;            // "across", "stargate", "debridge", etc.
@@ -100,7 +102,7 @@ export interface NormalizedQuote {
   readonly amountTier: number;
 
   // Source
-  readonly source: 'lifi' | 'rango' | 'bungee' | 'rubic' | 'direct';
+  readonly source: 'lifi' | 'rango' | 'bungee' | 'rubic' | 'squid' | 'direct';
   readonly bridge: string;         // Bridge slug: "across", "stargate", etc.
 
   // Amounts (strings for bigint safety)

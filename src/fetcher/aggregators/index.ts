@@ -7,6 +7,7 @@ import { fetchLifi } from './lifi.js';
 import { fetchRango } from './rango.js';
 import { fetchBungee } from './bungee.js';
 import { fetchRubic } from './rubic.js';
+import { fetchSquid } from './squid.js';
 
 // Give LI.FI enough time for complex/slow routes (monad, berachain, etc. can take 12-15s)
 const AGGREGATOR_TIMEOUT_MS = 22_000;
@@ -43,6 +44,7 @@ registerAggregator('rubic', (route) =>
     isFallbackOnlyRoute: RUBIC_FALLBACK_CHAINS.has(route.src) && RUBIC_FALLBACK_CHAINS.has(route.dst),
   })
 );
+registerAggregator('squid', fetchSquid);
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return new Promise((resolve, reject) => {

@@ -42,6 +42,15 @@ export const AGGREGATORS: Record<AggregatorId, AggregatorConfig> = {
     chainCount: 14,
     bridgeCount: 20,
   },
+  squid: {
+    id: 'squid',
+    name: 'Squid Router',
+    baseUrl: 'https://v2.api.squidrouter.com/v2',
+    authHeader: 'x-integrator-id',
+    envKey: 'SQUID_INTEGRATOR_ID',
+    chainCount: 14,  // EVM chains confirmed in /v2/sdk-info
+    bridgeCount: 5,  // Axelar GMP, CCTP, Chainflip, Squid Intents, IBC
+  },
 } as const;
 
 export const AGGREGATOR_IDS = Object.keys(AGGREGATORS) as AggregatorId[];
@@ -239,6 +248,20 @@ export const BUNGEE_BRIDGE_MAP: Record<string, string> = {
   'mantle-native-bridge':    'mantle-native-bridge',
   'optimism-bridge':         'optimism-bridge',
   'arbitrum-bridge':         'arbitrum-bridge',
+};
+
+// ─── Squid bridge name mapping ───
+// Provider names from @0xsquid/squid-types BridgeProvider enum
+export const SQUID_BRIDGE_MAP: Record<string, string> = {
+  'Axelar':                          'axelar',
+  'CCTP':                            'cctp',
+  'Noble CCTP':                      'cctp',
+  'Chainflip':                       'chainflip',
+  'Squid Intents':                   'squid',
+  'Squid':                           'squid',
+  'IBC':                             'ibc',
+  'IBC Packet forward middleware':   'ibc',
+  'Immutable':                       'immutable',
 };
 
 // ─── Rubic bridge name mapping ───
