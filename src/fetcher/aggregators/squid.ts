@@ -42,19 +42,54 @@ function getSquidChainId(chain: Chain): string {
   return String(chain.chainId);
 }
 
-// Placeholder fromAddress/toAddress per chain category
-const SQUID_PLACEHOLDER_ADDRESS: Record<SquidCategory, string> = {
+// Placeholder fromAddress/toAddress per chain category (EVM/non-Cosmos)
+const SQUID_PLACEHOLDER_ADDRESS: Record<Exclude<SquidCategory, 'cosmos'>, string> = {
   evm:     '0x000000000000000000000000000000000000dEaD',
   solana:  '5oNDL3swdJJF1g9DzJiZ4ynHXgszjAEpUkxVYejchzrY',
   bitcoin: 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4',
-  cosmos:  'cosmos1qnk2n4nlkpw9xfqntladh74er2xa62wac2d3u3',
   sui:     '0x0000000000000000000000000000000000000000000000000000000000000001',
 };
 
+/**
+ * Squid validates bech32 prefix against each Cosmos chain's expected HRP.
+ * A generic `cosmos1…` placeholder is rejected for all chains except Cosmos Hub.
+ * These addresses are derived from the same 32-byte key as the cosmos1 placeholder,
+ * re-encoded with each chain's bech32 HRP.
+ */
+const COSMOS_PLACEHOLDER: Record<string, string> = {
+  osmosis:     'osmo1qnk2n4nlkpw9xfqntladh74er2xa62war2wzrp',
+  cosmoshub:   'cosmos1qnk2n4nlkpw9xfqntladh74er2xa62wac2d3u3',
+  neutron:     'neutron1qnk2n4nlkpw9xfqntladh74er2xa62wa0w5s05',
+  dydx:        'dydx1qnk2n4nlkpw9xfqntladh74er2xa62wazgnk4y',
+  sei:         'sei1qnk2n4nlkpw9xfqntladh74er2xa62waxavynj',
+  injective:   'inj1qnk2n4nlkpw9xfqntladh74er2xa62wapc2k8t',
+  celestia:    'celestia1qnk2n4nlkpw9xfqntladh74er2xa62wa6mvz07',
+  axelar:      'axelar1qnk2n4nlkpw9xfqntladh74er2xa62wa0lt67j',
+  kujira:      'kujira1qnk2n4nlkpw9xfqntladh74er2xa62wa6el2ce',
+  terra:       'terra1qnk2n4nlkpw9xfqntladh74er2xa62wad48jhn',
+  dymension:   'dym1qnk2n4nlkpw9xfqntladh74er2xa62waev35sa',
+  stargaze:    'stars1qnk2n4nlkpw9xfqntladh74er2xa62wald207z',
+  akash:       'akash1qnk2n4nlkpw9xfqntladh74er2xa62wax2s4vf',
+  stride:      'stride1qnk2n4nlkpw9xfqntladh74er2xa62wag6awpl',
+  juno:        'juno1qnk2n4nlkpw9xfqntladh74er2xa62waar7fj0',
+  noble:       'noble1qnk2n4nlkpw9xfqntladh74er2xa62warjg6da',
+  persistence: 'persistence1qnk2n4nlkpw9xfqntladh74er2xa62wa9ampmh',
+  agoric:      'agoric1qnk2n4nlkpw9xfqntladh74er2xa62waevld99',
+  archway:     'archway1qnk2n4nlkpw9xfqntladh74er2xa62wa76pkly',
+  xion:        'xion1qnk2n4nlkpw9xfqntladh74er2xa62wafc8src',
+  elys:        'elys1qnk2n4nlkpw9xfqntladh74er2xa62wat3y4c3',
+  saga:        'saga1qnk2n4nlkpw9xfqntladh74er2xa62wa4zyqj4',
+  migaloo:     'migaloo1qnk2n4nlkpw9xfqntladh74er2xa62wax95gqa',
+};
+
+function getCosmosPlaceholder(chainId: string): string {
+  return COSMOS_PLACEHOLDER[chainId] ?? 'cosmos1qnk2n4nlkpw9xfqntladh74er2xa62wac2d3u3';
+}
+
 // Squid-specific token address overrides for non-EVM chains
-// Squid uses 0xEeee... for native on Solana, and "satoshi" for native BTC
-function getSquidTokenAddress(chainId: string, asset: Asset, token: TokenEntry, cat: SquidCategory): string {
-  if (cat === 'solana' && asset === 'ETH') return '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
+// For Solana: use the actual SPL mint address from tokens.ts (So111... for SOL, EPjF... for USDC, etc.)
+// For Bitcoin: Squid uses "satoshi" as the native token identifier
+function getSquidTokenAddress(_chainId: string, asset: Asset, token: TokenEntry, cat: SquidCategory): string {
   if (cat === 'bitcoin' && asset === 'ETH') return 'satoshi';
   return token.address;
 }
@@ -143,8 +178,8 @@ export async function fetchSquid(route: RouteKey): Promise<NormalizedQuote[]> {
     fromToken:   getSquidTokenAddress(route.src, route.asset, srcToken, srcCat),
     toToken:     getSquidTokenAddress(route.dst, route.asset, dstToken, dstCat),
     fromAmount:  fromAmountBase,
-    fromAddress: SQUID_PLACEHOLDER_ADDRESS[srcCat],
-    toAddress:   SQUID_PLACEHOLDER_ADDRESS[dstCat],
+    fromAddress: srcCat === 'cosmos' ? getCosmosPlaceholder(route.src) : SQUID_PLACEHOLDER_ADDRESS[srcCat],
+    toAddress:   dstCat === 'cosmos' ? getCosmosPlaceholder(route.dst) : SQUID_PLACEHOLDER_ADDRESS[dstCat],
     quoteOnly:   true,
     slippage:    1,
   };
@@ -171,7 +206,17 @@ export async function fetchSquid(route: RouteKey): Promise<NormalizedQuote[]> {
   if (!res.ok) {
     const errBody = await res.text().catch(() => '');
     // 400/404 = no route for this pair
-    if (res.status === 400 || res.status === 404) return [];
+    if (res.status === 400 || res.status === 404) {
+      // Log maintenance/explicit errors at debug level so we can diagnose
+      const lower = errBody.toLowerCase();
+      if (lower.includes('maintenance') || lower.includes('not supported')) {
+        logger.debug(
+          { route, status: res.status, body: errBody.slice(0, 200) },
+          'Squid: chain/route not supported or under maintenance'
+        );
+      }
+      return [];
+    }
     // 429 = rate limited — skip silently; the rate limiter will slow future calls
     if (res.status === 429) throw new Error(`HTTP 429: ${errBody.slice(0, 120)}`);
     // Squid returns 500 for thin-liquidity routes ("Low liquidity") — treat as no-route

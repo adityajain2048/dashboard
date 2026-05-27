@@ -90,8 +90,9 @@ const RATE_LIMITS: Record<AggregatorId, { rpm: number; burst: number; circuitThr
   // Bungee: burst=2 prevents 429 floods on startup; 429s excluded from circuit failures anyway.
   bungee: { rpm: 40,  burst: 2,  circuitThreshold: 15 },
   rubic:  { rpm: 12,  burst: 1,  circuitThreshold: 10 },
-  // Squid: integrator tier allows ~1 req/sec observed; burst=1 forces sequential dispatch.
-  squid:  { rpm: 30,  burst: 1,  circuitThreshold: 20 },
+  // Squid: 8 req/sec burst-tested and confirmed clean (24/24 across 3 rounds).
+  // 20 req/sec gateway increase pending — bump to rpm:1200,burst:8 once Squid confirms.
+  squid:  { rpm: 480, burst: 8, circuitThreshold: 20 },
 };
 
 const limiters = new Map<AggregatorId, RateLimiter>();

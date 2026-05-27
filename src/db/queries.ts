@@ -182,8 +182,26 @@ export async function updateRouteStatus(
     bestBridge = best.bridge;
     bestOutputUsd = best.output_usd;
 
-    // For worst, only consider valid (non-zero) rows
-    if (validRows.length > 0) {
+    // For worst, only consider rows that are:
+    //  - non-zero output (not broken)
+    //  - reasonable fee (≤1000 bps = ≤10%) — same threshold as recalcUsd MAX_FEE_BPS
+    //  - recently fetched (within 3× the stale threshold) to exclude ghost quotes from
+    //    aggregators that had a bad cycle hours ago and haven't been called since
+    const staleMs = STALE_THRESHOLD_MS[refreshTier] * 3;
+    const freshValidRows = latestRows.filter((r) => {
+      if (Number(r.output_usd) <= 0.01) return false;
+      if (r.total_fee_bps != null && r.total_fee_bps > 1000) return false;
+      const ageMs = Date.now() - new Date(r.ts).getTime();
+      return ageMs <= staleMs;
+    });
+
+    if (freshValidRows.length > 0) {
+      const worst = freshValidRows.reduce((a, b) =>
+        Number(b.output_usd) < Number(a.output_usd) ? b : a
+      );
+      worstOutputUsd = worst.output_usd;
+    } else if (validRows.length > 0) {
+      // Fallback: use all valid rows if no fresh ones exist
       const worst = validRows.reduce((a, b) =>
         Number(b.output_usd) < Number(a.output_usd) ? b : a
       );
@@ -206,7 +224,7 @@ export async function updateRouteStatus(
     // Routes where best output is far below input are broken, not arbitrage opportunities.
     const bestIsReasonable = bestFeeBps != null && bestFeeBps < 1000;
 
-    if (bestIsReasonable && Number(bestOutputUsd) > 0 && validRows.length > 1) {
+    if (bestIsReasonable && Number(bestOutputUsd) > 0 && freshValidRows.length > 1) {
       spreadBps = Math.round(
         (10000 * (Number(bestOutputUsd) - Number(worstOutputUsd))) / Number(bestOutputUsd)
       );
@@ -384,6 +402,40 @@ export async function insertFetchLog(entry: FetchLogEntry): Promise<void> {
       entry.quoteCount,
     ]
   );
+}
+
+/**
+ * For a list of "src:dst:asset:amountTier" task keys (Squid gaps), return a map
+ * of which non-Squid aggregators have historically provided quotes for each.
+ * Used by gap-fill scheduler to only call aggregators that have shown coverage.
+ */
+export async function getGapCoverage(
+  taskKeys: string[]
+): Promise<Map<string, string[]>> {
+  const coverage = new Map<string, string[]>();
+  if (taskKeys.length === 0) return coverage;
+
+  const result = await pool.query<{
+    src_chain: string;
+    dst_chain: string;
+    asset: string;
+    amount_tier: number;
+    source: string;
+  }>(
+    `SELECT DISTINCT src_chain, dst_chain, asset, amount_tier::int, source
+     FROM quotes
+     WHERE source != 'squid'
+       AND ts > NOW() - INTERVAL '7 days'
+       AND (src_chain || ':' || dst_chain || ':' || asset || ':' || amount_tier::text) = ANY($1::text[])`,
+    [taskKeys]
+  );
+
+  for (const row of result.rows) {
+    const key = `${row.src_chain}:${row.dst_chain}:${row.asset}:${row.amount_tier}`;
+    if (!coverage.has(key)) coverage.set(key, []);
+    coverage.get(key)!.push(row.source);
+  }
+  return coverage;
 }
 
 /** Health check: quote count and oldest quote timestamp. */

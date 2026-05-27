@@ -2,6 +2,7 @@ import type { RouteKey, Asset } from '../types/index.js';
 import type { Logger } from '../lib/logger.js';
 import { routeTag, logger as rootLogger } from '../lib/logger.js';
 import { fetchAllAggregators } from './aggregators/index.js';
+import type { AggregatorSubset } from './aggregators/index.js';
 import { gapFill } from './bridges/index.js';
 import { rankQuotes, deduplicateQuotes } from './normalizer.js';
 import { recalcQuotesUsd } from './recalcUsd.js';
@@ -17,7 +18,9 @@ export async function processRoute(
   asset: Asset,
   amountTier: number,
   batchId: string,
-  parentLog?: Logger
+  parentLog?: Logger,
+  /** Limit which aggregators are called. undefined = all applicable. */
+  aggregators?: AggregatorSubset
 ): Promise<number> {
   const route = routeTag(src, dst, asset, amountTier);
   const log = (parentLog ?? rootLogger).child({ route });
@@ -25,7 +28,7 @@ export async function processRoute(
   const startMs = Date.now();
   const routeKey: RouteKey = { src, dst, asset, amountTier };
 
-  const { quotes: aggQuotes, bridgesSeen } = await fetchAllAggregators(routeKey, batchId, log);
+  const { quotes: aggQuotes, bridgesSeen } = await fetchAllAggregators(routeKey, batchId, log, aggregators);
   const gapQuotes = await gapFill(routeKey, bridgesSeen, batchId);
   const allQuotes = [...aggQuotes, ...gapQuotes];
 

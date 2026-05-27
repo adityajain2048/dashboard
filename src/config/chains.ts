@@ -103,14 +103,18 @@ export function getChain(slug: string): Chain {
 
 /** Ordered chain slugs for heatmap display (mega chains first, then by type) */
 export const HEATMAP_ORDER: readonly string[] = [
-  // Mega
-  'ethereum', 'arbitrum', 'base', 'solana', 'bsc',
-  // Major
-  'optimism', 'polygon', 'avalanche', 'bitcoin',
-  // High-growth
-  'monad', 'megaeth',
-  // Growth L2s
+  // Tier 1
+  'ethereum', 'arbitrum', 'base', 'optimism', 'polygon', 'bsc', 'solana',
+  // Tier 2
+  'avalanche', 'bitcoin', 'monad', 'megaeth',
   'linea', 'zksync', 'scroll', 'sonic', 'mantle',
-  // Emerging EVM
   'berachain', 'abstract', 'unichain', 'hyperliquid',
-]; // Non-EVM: solana, bitcoin only
+  // Tier 3 — long-tail EVM
+  'blast', 'celo', 'fantom', 'fraxtal', 'gnosis', 'hedera',
+  'filecoin', 'immutable', 'kava', 'moonbeam', 'peaq', 'soneium', 'sui',
+  // Tier 3 — Cosmos / IBC
+  'osmosis', 'cosmoshub', 'neutron', 'dydx', 'sei', 'injective',
+  'celestia', 'axelar', 'kujira', 'terra', 'dymension',
+  'stargaze', 'akash', 'stride', 'juno', 'noble',
+  'persistence', 'agoric', 'archway', 'xion', 'elys', 'saga', 'migaloo',
+];

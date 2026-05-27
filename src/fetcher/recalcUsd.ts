@@ -18,6 +18,16 @@ import { logger } from '../lib/logger.js';
  */
 const MAX_OUTPUT_RATIO = 1.03;
 
+/**
+ * Maximum plausible fee in basis points (10% = 1000bps).
+ * Any quote exceeding this is almost certainly garbage — either from an API
+ * returning corrupted data during an outage, a DEX with near-zero liquidity
+ * at the requested amount, or a mis-routed cross-asset swap.
+ * No legitimate bridge charges >10% for the routes we track; drop these to
+ * keep the matrix clean and avoid surfacing misleading spread/fee data.
+ */
+const MAX_FEE_BPS = 1000;
+
 /** Recalculate USD values for a batch of quotes using CoinGecko prices.
  *  Replaces inputUsd, outputUsd, and all derived fee fields.
  *  Drops quotes whose output exceeds input by more than MAX_OUTPUT_RATIO (price mismatch). */
@@ -34,7 +44,39 @@ function recalcSingleQuoteUsd(q: NormalizedQuote): NormalizedQuote | null {
   const srcToken = getToken(q.srcChain, q.asset);
   const dstToken = getToken(q.dstChain, q.asset);
 
-  // Compute USD from base amounts using CoinGecko prices
+  // Cross-asset detection: when asset is 'ETH' (native token slot) and the src/dst
+  // chains have DIFFERENT native tokens (e.g. STRD on Stride → ETH on Ethereum via Squid),
+  // our CoinGecko prices for each side are independent tokens. Comparing them to derive
+  // fees gives wrong results (prices fluctuate independently, output can appear > input).
+  // In this case, trust the aggregator's own USD values — they know the actual swap math.
+  const isCrossAsset =
+    q.asset === 'ETH' &&
+    srcToken.address !== dstToken.address &&
+    srcToken.address !== 'native' &&
+    dstToken.address !== 'native';
+
+  if (isCrossAsset) {
+    // Use aggregator-provided USD values directly; only recompute fee bps from those.
+    const inUsd = Number(q.inputUsd);
+    const outUsd = Number(q.outputUsd);
+    if (inUsd <= 0) return q; // can't compute, keep as-is
+    const totalFeeUsd = Math.max(0, inUsd - outUsd);
+    const gasUsd = Number(q.gasCostUsd);
+    const protocolFeeUsd = Math.max(0, totalFeeUsd - gasUsd);
+    const totalFeeBps = Math.round((10000 * totalFeeUsd) / inUsd);
+    const protocolFeeBps = Math.round((10000 * protocolFeeUsd) / inUsd);
+    if (totalFeeBps > MAX_FEE_BPS) {
+      logger.debug(
+        { bridge: q.bridge, src: q.srcChain, dst: q.dstChain, asset: q.asset, totalFeeBps },
+        'Dropping quote: fee exceeds MAX_FEE_BPS (bad route/no liquidity)'
+      );
+      return null;
+    }
+    return { ...q, totalFeeUsd: totalFeeUsd.toFixed(8), totalFeeBps, protocolFeeBps };
+  }
+
+  // Same-asset route (USDC→USDC, ETH→ETH, native→same-native):
+  // Recalculate USD from raw token amounts using CoinGecko prices for consistency.
   const inputUsd = computeAmountUsd(q.inputAmount, srcToken.decimals, q.asset, q.srcChain);
   const outputUsd = computeAmountUsd(q.outputAmount, dstToken.decimals, q.asset, q.dstChain);
 
@@ -60,6 +102,16 @@ function recalcSingleQuoteUsd(q: NormalizedQuote): NormalizedQuote | null {
   const protocolFeeUsd = Math.max(0, totalFeeUsd - gasUsd);
   const totalFeeBps = inUsd > 0 ? Math.round((10000 * totalFeeUsd) / inUsd) : 0;
   const protocolFeeBps = inUsd > 0 ? Math.round((10000 * protocolFeeUsd) / inUsd) : 0;
+
+  // Drop quotes with implausibly high fees — these are garbage from API outages,
+  // zero-liquidity DEX routes, or corrupted responses.
+  if (totalFeeBps > MAX_FEE_BPS) {
+    logger.debug(
+      { bridge: q.bridge, src: q.srcChain, dst: q.dstChain, asset: q.asset, totalFeeBps },
+      'Dropping quote: fee exceeds MAX_FEE_BPS (bad route/no liquidity)'
+    );
+    return null;
+  }
 
   return {
     ...q,

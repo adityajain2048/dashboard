@@ -27,6 +27,12 @@ function shouldUseRubic(route: RouteKey): boolean {
 
 export type AggregatorFetcher = (route: RouteKey) => Promise<NormalizedQuote[]>;
 
+/**
+ * When set, only these aggregators are called (Rubic filter still applies).
+ * undefined = run all applicable aggregators.
+ */
+export type AggregatorSubset = readonly AggregatorId[] | undefined;
+
 export const aggregatorRegistry: Record<AggregatorId, AggregatorFetcher> = {} as Record<
   AggregatorId,
   AggregatorFetcher
@@ -67,14 +73,20 @@ const circuitBreakLogged = new Set<AggregatorId>();
 export async function fetchAllAggregators(
   route: RouteKey,
   batchId: string,
-  parentLog?: Logger
+  parentLog?: Logger,
+  subset?: AggregatorSubset
 ): Promise<{ quotes: NormalizedQuote[]; bridgesSeen: Set<string> }> {
   const quotes: NormalizedQuote[] = [];
   const bridgesSeen = new Set<string>();
   const baseLog = parentLog ?? rootLogger;
 
   const allIds = Object.keys(aggregatorRegistry) as AggregatorId[];
-  const ids = allIds.filter((id) => (id === 'rubic' ? shouldUseRubic(route) : true));
+  // Filter to requested subset (if any), then apply per-aggregator eligibility rules
+  const ids = allIds.filter((id) => {
+    if (subset && !subset.includes(id)) return false;
+    if (id === 'rubic') return shouldUseRubic(route);
+    return true;
+  });
   const results = await Promise.allSettled(
     ids.map(async (id) => {
       const log = baseLog.child({ aggregator: id });

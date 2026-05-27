@@ -4,9 +4,7 @@ import { AssetIcon } from './components/AssetIcon';
 import { InsightsCard } from './components/InsightsCard';
 import { RouteExplorer } from './views/RouteExplorer';
 import { Heatmap } from './views/Heatmap';
-import { Bridges } from './views/Bridges';
 import { Opportunities } from './views/Opportunities';
-import { RelayReport } from './views/RelayReport';
 import { HEATMAP_ORDER } from './config/chains';
 
 const ASSETS = ['ETH', 'USDC', 'USDT'] as const;
@@ -16,13 +14,11 @@ const TIERS: Array<{ key: number; label: string }> = [
   { key: 50000, label: '$50K' },
 ];
 
-type Tab = 'explorer' | 'matrix' | 'bridges' | 'insights' | 'relay';
+type Tab = 'explorer' | 'matrix' | 'insights';
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: 'explorer', label: 'Explorer' },
   { key: 'matrix', label: 'Matrix' },
-  { key: 'bridges', label: 'Bridges' },
   { key: 'insights', label: 'Insights' },
-  { key: 'relay', label: 'Relay Intel' },
 ];
 
 interface HealthData {
@@ -199,32 +195,25 @@ function App() {
       </div>
 
       {/* ═══ MAIN CONTENT ═══ */}
-      <div style={{ maxWidth: 1440, margin: '0 auto', padding: '20px 24px' }}>
-
-        {activeTab === 'explorer' && (
-          <>
-            <InsightsCard />
-            <RouteExplorer asset={asset} tier={tier} selectedRoute={selectedRoute} />
-          </>
-        )}
-
-        {activeTab === 'matrix' && (
+      {activeTab === 'matrix' ? (
+        /* Matrix: full-screen, no max-width, minimal padding so the grid uses all available space */
+        <div style={{ padding: '12px 8px' }}>
           <Heatmap asset={asset} tier={tier} onCellClick={handleCellClick} />
-        )}
+        </div>
+      ) : (
+        <div style={{ maxWidth: 1440, margin: '0 auto', padding: '20px 24px' }}>
+          {activeTab === 'explorer' && (
+            <>
+              <InsightsCard />
+              <RouteExplorer asset={asset} tier={tier} selectedRoute={selectedRoute} />
+            </>
+          )}
 
-        {activeTab === 'bridges' && (
-          <Bridges />
-        )}
-
-        {activeTab === 'insights' && (
-          <Opportunities onRouteClick={handleRouteClick} />
-        )}
-
-        {activeTab === 'relay' && (
-          <RelayReport />
-        )}
-
-      </div>
+          {activeTab === 'insights' && (
+            <Opportunities onRouteClick={handleRouteClick} />
+          )}
+        </div>
+      )}
     </div>
   );
 }

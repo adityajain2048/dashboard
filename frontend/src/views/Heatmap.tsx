@@ -103,7 +103,7 @@ export function Heatmap({ asset, tier, onCellClick }: HeatmapProps) {
       <SectionHeader asset={asset} tier={tier} stats={data.stats} />
 
       <div style={{ background: '#12121f', border: '1px solid #1e1e3a', borderRadius: 12, overflow: 'hidden' }}>
-        <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 'calc(100vh - 280px)' }}>
+        <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 'calc(100vh - 196px)' }}>
           <div
             style={{
               display: 'grid',
