@@ -125,8 +125,8 @@ export async function fetchSquid(route: RouteKey): Promise<NormalizedQuote[]> {
   const dstCat = getSquidCategory(dstChain);
   if (!srcCat || !dstCat) return [];
 
-  // Cosmos chains only support USDC/USDT (no ETH bridging via Squid IBC)
-  if (route.asset === 'ETH' && (srcCat === 'cosmos' || dstCat === 'cosmos')) return [];
+  // Cosmos ETH = native chain token (OSMO, ATOM, SEI, etc.) — handled via getSquidTokenAddress
+  // which returns the IBC denom from tokens.ts (e.g. "uosmo"). Squid bridges via Axelar+swap.
 
   // Sui has no USDC/USDT available via Squid currently — skip
   if (srcCat === 'sui' || dstCat === 'sui') return [];
@@ -172,6 +172,8 @@ export async function fetchSquid(route: RouteKey): Promise<NormalizedQuote[]> {
     const errBody = await res.text().catch(() => '');
     // 400/404 = no route for this pair
     if (res.status === 400 || res.status === 404) return [];
+    // 429 = rate limited — skip silently; the rate limiter will slow future calls
+    if (res.status === 429) throw new Error(`HTTP 429: ${errBody.slice(0, 120)}`);
     // Squid returns 500 for thin-liquidity routes ("Low liquidity") — treat as no-route
     if (res.status === 500) {
       const lower = errBody.toLowerCase();

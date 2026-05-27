@@ -26,6 +26,44 @@ const CHAIN_TO_COINGECKO_ID: Record<string, string> = {
   megaeth: 'ethereum',
   solana: 'solana',
   bitcoin: 'bitcoin',
+  sui: 'sui',
+  // ─── New EVM chains (Squid expansion) ───
+  blast: 'ethereum',                    // Blast uses ETH for gas
+  celo: 'celo',
+  fantom: 'fantom',
+  fraxtal: 'frax-share',                // FXS
+  gnosis: 'xdai',                       // xDAI (~$1)
+  hedera: 'hedera-hashgraph',           // HBAR
+  filecoin: 'filecoin',
+  immutable: 'immutable-x',             // IMX
+  kava: 'kava',
+  moonbeam: 'moonbeam',                 // GLMR
+  peaq: 'peaq-2',
+  soneium: 'ethereum',                  // Soneium uses ETH for gas
+  // ─── Cosmos IBC chains — native staking tokens ───
+  osmosis: 'osmosis',                   // OSMO
+  cosmoshub: 'cosmos',                  // ATOM
+  neutron: 'neutron-3',                 // NTRN
+  dydx: 'dydx-chain',                   // DYDX
+  sei: 'sei-network',                   // SEI
+  kujira: 'kujira',                     // KUJI
+  terra: 'terra-luna-2',                // LUNA (post-fork)
+  injective: 'injective-protocol',      // INJ
+  stargaze: 'stargaze',                 // STARS
+  juno: 'juno-network',                 // JUNO
+  axelar: 'axelar',                     // AXL
+  celestia: 'celestia',                 // TIA
+  dymension: 'dymension',               // DYM
+  stride: 'stride',                     // STRD
+  agoric: 'agoric',                     // BLD
+  akash: 'akash-network',               // AKT
+  archway: 'archway',                   // ARCH
+  xion: 'burnt-xion',                   // XION
+  elys: 'elys-network',                 // ELYS
+  persistence: 'persistence',           // XPRT
+  saga: 'saga-2',                       // SAGA
+  migaloo: 'white-whale',               // WHALE
+  // noble omitted: no meaningful native token (USDC issuance chain)
 };
 
 const COINGECKO_IDS = [...new Set(Object.values(CHAIN_TO_COINGECKO_ID))];
@@ -44,6 +82,41 @@ const CHAIN_FALLBACK_NATIVE_PRICE: Record<string, number> = {
   'hyperliquid': 30,  // HYPE
   'monad': 0.02,      // MON (~$0.022 as of Mar 2026)
   'bitcoin': 70_000,  // BTC (~$70k as of Mar 2026)
+  // ─── New EVM chains ───
+  'sui': 2.0,
+  'celo': 0.30,
+  'fantom': 0.20,
+  'fraxtal': 2.0,
+  'gnosis': 1.0,      // xDAI pegged ~$1
+  'hedera': 0.07,
+  'filecoin': 3.0,
+  'immutable': 0.50,
+  'kava': 0.30,
+  'moonbeam': 0.05,
+  'peaq': 0.10,
+  // ─── Cosmos IBC native tokens ───
+  'osmosis': 0.50,    // OSMO
+  'cosmoshub': 5.0,   // ATOM
+  'neutron': 0.30,    // NTRN
+  'dydx': 0.80,       // DYDX
+  'sei': 0.30,        // SEI
+  'kujira': 0.30,     // KUJI
+  'terra': 0.30,      // LUNA
+  'injective': 15.0,  // INJ
+  'stargaze': 0.02,   // STARS
+  'juno': 0.10,       // JUNO
+  'axelar': 0.30,     // AXL
+  'celestia': 3.0,    // TIA
+  'dymension': 0.30,  // DYM
+  'stride': 0.20,     // STRD
+  'agoric': 0.05,     // BLD
+  'akash': 2.0,       // AKT
+  'archway': 0.05,    // ARCH
+  'xion': 0.20,       // XION
+  'elys': 0.05,       // ELYS
+  'persistence': 0.05,// XPRT
+  'saga': 0.30,       // SAGA
+  'migaloo': 0.05,    // WHALE
 };
 
 let cache: Record<string, number> = {};

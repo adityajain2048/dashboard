@@ -9,10 +9,7 @@ import { logger } from './logger.js';
  *   and the aggregator is skipped until the cooldown expires.
  */
 export class RateLimiter {
-  private tokens: number;
-  private lastRefill: number;
   private readonly maxTokens: number;
-  private readonly refillRate: number; // tokens per ms
   private readonly burstLimit: number;
 
   private consecutiveFailures = 0;
@@ -26,11 +23,12 @@ export class RateLimiter {
   ) {
     this.maxTokens = maxPerMinute;
     this.burstLimit = opts?.burst ?? Math.min(5, maxPerMinute);
-    this.tokens = this.burstLimit;
-    this.refillRate = maxPerMinute / 60_000;
-    this.lastRefill = Date.now();
     this.circuitThreshold = opts?.circuitThreshold ?? 10;
     this.circuitCooldownMs = opts?.circuitCooldownMs ?? 60_000;
+    // Pre-load burst: set nextSlotMs back by (burst - 1) intervals so the first
+    // `burst` callers can fire without waiting.
+    const intervalMs = 60_000 / maxPerMinute;
+    this.nextSlotMs = Date.now() - (this.burstLimit - 1) * intervalMs;
   }
 
   isOpen(): boolean {
@@ -53,23 +51,32 @@ export class RateLimiter {
     this.consecutiveFailures = 0;
   }
 
+  /**
+   * Serialized acquire: each caller is assigned a unique time slot so concurrent
+   * callers don't all fire simultaneously (the thundering-herd bug in a naive
+   * token-bucket when many waiters share the same computed waitMs).
+   *
+   * nextSlotMs tracks the earliest time the next caller may fire.
+   * Burst capacity is pre-loaded by setting nextSlotMs back by burstLimit intervals.
+   */
+  private nextSlotMs: number;
+
   async acquire(): Promise<void> {
-    this.refill();
-    if (this.tokens >= 1) {
-      this.tokens--;
+    const intervalMs = 60_000 / this.maxTokens; // ms between requests at steady-state
+    const now = Date.now();
+
+    // Claim a slot atomically (JS is single-threaded, so no real race here)
+    if (this.nextSlotMs <= now) {
+      // Slot is in the past — fire immediately and reset to now
+      this.nextSlotMs = now + intervalMs;
       return;
     }
-    const waitMs = Math.ceil((1 - this.tokens) / this.refillRate);
-    await new Promise((resolve) => setTimeout(resolve, waitMs));
-    this.refill();
-    this.tokens = Math.max(0, this.tokens - 1);
-  }
 
-  private refill(): void {
-    const now = Date.now();
-    const elapsed = now - this.lastRefill;
-    this.tokens = Math.min(this.maxTokens, this.tokens + elapsed * this.refillRate);
-    this.lastRefill = now;
+    // Slot is in the future — queue this caller behind the last one
+    const mySlot = this.nextSlotMs;
+    this.nextSlotMs += intervalMs;
+    const waitMs = mySlot - now;
+    await new Promise<void>((resolve) => setTimeout(resolve, waitMs));
   }
 }
 
@@ -83,8 +90,8 @@ const RATE_LIMITS: Record<AggregatorId, { rpm: number; burst: number; circuitThr
   // Bungee: burst=2 prevents 429 floods on startup; 429s excluded from circuit failures anyway.
   bungee: { rpm: 40,  burst: 2,  circuitThreshold: 15 },
   rubic:  { rpm: 12,  burst: 1,  circuitThreshold: 10 },
-  // Squid: integrator tier — conservative start, same as Bungee. Adjust after observing rate limits.
-  squid:  { rpm: 40,  burst: 2,  circuitThreshold: 15 },
+  // Squid: integrator tier allows ~1 req/sec observed; burst=1 forces sequential dispatch.
+  squid:  { rpm: 30,  burst: 1,  circuitThreshold: 20 },
 };
 
 const limiters = new Map<AggregatorId, RateLimiter>();
