@@ -1,6 +1,6 @@
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { SectionHeader } from '../components/SectionHeader';
-import { CATEGORY_COLORS, CATEGORIES } from '../utils/categorize';
+import { CATEGORY_COLORS } from '../utils/categorize';
 import { formatUSD } from '../utils/format';
 import type { EnrichedProtocol } from '../api/merge';
 import type { Category } from '../utils/categorize';
@@ -105,11 +105,11 @@ export function VolumeLeaderboard({ protocols }: VolumeLeaderboardProps) {
             tickLine={false}
           />
           <Tooltip
-            formatter={(value: number, _: string, props: { payload?: { fullName?: string; vol7d?: number; tvl?: number; chains?: number; category?: string } }) => [
-              formatUSD(value),
+            formatter={(value: unknown, _: unknown, props: { payload?: { fullName?: string; vol7d?: number; tvl?: number; chains?: number; category?: string } }) => [
+              formatUSD(Number(value)),
               `7d: ${formatUSD(props.payload?.vol7d ?? 0)} · TVL: ${formatUSD(props.payload?.tvl ?? 0)} · ${props.payload?.chains ?? 0} chains`,
             ]}
-            labelFormatter={(label: string, payload) => payload?.[0]?.payload?.fullName ?? label}
+            labelFormatter={(label: unknown, payload) => payload?.[0]?.payload?.fullName ?? String(label)}
             contentStyle={{ background: '#1a1a2e', border: '1px solid #2e2e4e', borderRadius: 8, fontSize: 12 }}
             labelStyle={{ color: '#e5e7eb', fontWeight: 600 }}
             itemStyle={{ color: '#9ca3af' }}
@@ -117,7 +117,7 @@ export function VolumeLeaderboard({ protocols }: VolumeLeaderboardProps) {
           <Bar
             dataKey="vol24h"
             radius={[0, 4, 4, 0]}
-            label={{ position: 'right', formatter: (v: number) => formatUSD(v), fill: '#6b7280', fontSize: 10 }}
+            label={{ position: 'right', formatter: (v: unknown) => formatUSD(Number(v)), fill: '#6b7280', fontSize: 10 }}
           >
             {data.map((entry, i) => (
               <Cell key={i} fill={CATEGORY_COLORS[entry.category as Category] ?? '#6b7280'} opacity={0.85} />

@@ -100,10 +100,10 @@ export function ActionCoverage({ actions, standards }: ActionCoverageProps) {
             tickLine={false}
           />
           <Tooltip
-            formatter={(value: number, name: string, props: { payload?: { protocols?: number } }) =>
+            formatter={(value: unknown, name: unknown, props: { payload?: { protocols?: number } }) =>
               name === 'implementations'
                 ? [`${value} implementations · ${props.payload?.protocols ?? 0} protocols`, 'Coverage']
-                : [value, name]
+                : [value as number, name as string]
             }
             contentStyle={{ background: '#1a1a2e', border: '1px solid #2e2e4e', borderRadius: 8, fontSize: 12 }}
             labelStyle={{ color: '#e5e7eb', fontWeight: 600 }}

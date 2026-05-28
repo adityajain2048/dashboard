@@ -102,7 +102,7 @@ export function ChainBusiness({ protocols, standards }: ChainBusinessProps) {
             }}
           />
           <Tooltip
-            formatter={(value: number, _: string, props: { payload?: { protocolCount?: number; vol24h?: number; implementations?: number } }) => {
+            formatter={(value: unknown, _: unknown, props: { payload?: { protocolCount?: number; vol24h?: number; implementations?: number } }) => {
               if (mode === 'depth') {
                 return [
                   `${value} action implementations`,
@@ -110,7 +110,7 @@ export function ChainBusiness({ protocols, standards }: ChainBusinessProps) {
                 ];
               }
               return [
-                formatUSD(value),
+                formatUSD(Number(value)),
                 `${props.payload?.protocolCount ?? 0} protocols · ${props.payload?.implementations ?? 0} implementations`,
               ];
             }}

@@ -85,7 +85,7 @@ export function StandardsBreakdown({ summaries }: StandardsBreakdownProps) {
               ))}
             </Pie>
             <Tooltip
-              formatter={(v: number, _: string, props: { payload?: { patterns?: number; actions?: string } }) => [
+              formatter={(v: unknown, _: unknown, props: { payload?: { patterns?: number; actions?: string } }) => [
                 `${v} protocols`,
                 `${props.payload?.patterns ?? 0} patterns · ${props.payload?.actions ?? ''}`,
               ]}

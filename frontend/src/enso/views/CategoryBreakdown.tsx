@@ -84,8 +84,8 @@ export function CategoryBreakdown({ protocols }: CategoryBreakdownProps) {
               ))}
             </Pie>
             <Tooltip
-              formatter={(v: number, _: string, props: { payload?: { count?: number; vol24h?: number } }) => {
-                const pct = totalValue > 0 ? Math.round((v / totalValue) * 100) : 0;
+              formatter={(v: unknown, _: unknown, props: { payload?: { count?: number; vol24h?: number } }) => {
+                const pct = totalValue > 0 ? Math.round((Number(v)) / totalValue * 100) : 0;
                 if (mode === 'count') {
                   return [
                     `${v} protocols (${pct}%)`,
@@ -93,7 +93,7 @@ export function CategoryBreakdown({ protocols }: CategoryBreakdownProps) {
                   ];
                 }
                 return [
-                  `${formatUSD(v)} (${pct}%)`,
+                  `${formatUSD(Number(v))} (${pct}%)`,
                   `${props.payload?.count ?? 0} protocols`,
                 ];
               }}

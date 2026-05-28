@@ -81,7 +81,7 @@ export function TVLLeaderboard({ protocols, standards }: ProtocolDepthProps) {
             tickLine={false}
           />
           <Tooltip
-            formatter={(value: number, _: string, props: { payload?: { fullName?: string; actions?: string; patterns?: string; chains?: number; category?: string } }) => [
+            formatter={(value: unknown, _: unknown, props: { payload?: { fullName?: string; actions?: string; patterns?: string; chains?: number; category?: string } }) => [
               `${value} action types`,
               `${props.payload?.actions ?? ''} · ${props.payload?.chains ?? 0} chains · ${props.payload?.category ?? ''}`,
             ]}
