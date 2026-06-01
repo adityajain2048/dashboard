@@ -1,6 +1,9 @@
 import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
 import { z } from 'zod';
 import { pool } from '../../db/connection.js';
+import { computeRouteStatus } from '../../db/queries.js';
+import type { RouteLatestInput } from '../../db/queries.js';
+import { getRouteTier } from '../../config/routes.js';
 
 const querySchema = z.object({
   limit: z.coerce.number().min(1).max(100).default(20),
@@ -8,6 +11,11 @@ const querySchema = z.object({
   asset: z.enum(['ETH', 'USDC', 'USDT']).optional(),
   tier: z.enum(['50', '1000', '50000']).optional(),
 });
+
+/** 30 s cache — opportunities are computed from route_latest which is large. */
+interface CacheEntry { payload: unknown; expiresAt: number }
+const CACHE_TTL_MS = 30_000;
+const cache = new Map<string, CacheEntry>();
 
 export default async function opportunitiesRoutes(
   app: FastifyInstance,
@@ -20,61 +28,121 @@ export default async function opportunitiesRoutes(
     }
     const { limit, minSpreadBps, asset, tier } = parsed.data;
 
-    let sql = `SELECT src_chain, dst_chain, asset, amount_tier, spread_bps, best_bridge, best_output_usd, worst_output_usd, quote_count, last_seen
-      FROM route_status WHERE state = 'active' AND spread_bps >= $1
-      AND best_fee_bps IS NOT NULL AND best_fee_bps < 1000`;
-    const params: (string | number)[] = [minSpreadBps];
+    const cacheKey = `${asset ?? '*'}:${tier ?? '*'}:${minSpreadBps}`;
+    const cached = cache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      // Apply limit to cached result (limit may differ between callers)
+      const cachedData = cached.payload as { opportunities: unknown[]; total: number };
+      return reply.send({
+        opportunities: cachedData.opportunities.slice(0, limit),
+        total: cachedData.total,
+      });
+    }
+
+    // ── Query route_latest ─────────────────────────────────────────────────
+    // Compute best/worst per route in application code using the canonical
+    // comparator so Opportunities always agrees with /api/quotes and /api/matrix.
+    const params: (string | number)[] = [];
+    let sql = `SELECT src_chain, dst_chain, asset, amount_tier,
+                      bridge, source, output_usd, input_usd, total_fee_bps, estimated_seconds, ts
+               FROM route_latest`;
+    const conditions: string[] = [];
     if (asset) {
       params.push(asset);
-      sql += ` AND asset = $${params.length}`;
+      conditions.push(`asset = $${params.length}`);
     }
     if (tier) {
       params.push(parseInt(tier, 10));
-      sql += ` AND amount_tier = $${params.length}`;
+      conditions.push(`amount_tier = $${params.length}`);
     }
-    sql += ` ORDER BY spread_bps DESC LIMIT $${params.length + 1}`;
-    params.push(limit);
+    if (conditions.length > 0) sql += ` WHERE ${conditions.join(' AND ')}`;
 
     const result = await pool.query<{
       src_chain: string;
       dst_chain: string;
       asset: string;
       amount_tier: number;
-      spread_bps: number;
-      best_bridge: string | null;
-      best_output_usd: string | null;
-      worst_output_usd: string | null;
-      quote_count: number;
-      last_seen: Date | null;
+      bridge: string;
+      source: string;
+      output_usd: string;
+      input_usd: string;
+      total_fee_bps: number;
+      estimated_seconds: number;
+      ts: Date;
     }>(sql, params);
 
-    const countParams: (string | number)[] = ['active', minSpreadBps];
-    let countSql = 'SELECT COUNT(*)::text FROM route_status WHERE state = $1 AND spread_bps >= $2 AND best_fee_bps IS NOT NULL AND best_fee_bps < 1000';
-    if (asset) {
-      countParams.push(asset);
-      countSql += ` AND asset = $${countParams.length}`;
-    }
-    if (tier) {
-      countParams.push(parseInt(tier, 10));
-      countSql += ` AND amount_tier = $${countParams.length}`;
-    }
-    const countResult = await pool.query<{ count: string }>(countSql, countParams);
-    const total = parseInt(countResult.rows[0]?.count ?? '0', 10);
+    // ── Group by (src, dst, asset, tier) ──────────────────────────────────
+    const routeMap = new Map<string, RouteLatestInput[]>();
+    const routeMeta = new Map<string, { src: string; dst: string; asset: string; amountTier: number }>();
 
-    const opportunities = result.rows.map((r) => ({
-      src: r.src_chain,
-      dst: r.dst_chain,
-      asset: r.asset,
-      amountTier: r.amount_tier,
-      spreadBps: r.spread_bps,
-      bestBridge: r.best_bridge,
-      bestOutputUsd: r.best_output_usd,
-      worstBridge: null as string | null,
-      worstOutputUsd: r.worst_output_usd,
-      quoteCount: r.quote_count,
-      lastSeen: r.last_seen?.toISOString() ?? null,
-    }));
+    for (const row of result.rows) {
+      const key = `${row.src_chain}:${row.dst_chain}:${row.asset}:${row.amount_tier}`;
+      if (!routeMap.has(key)) {
+        routeMap.set(key, []);
+        routeMeta.set(key, {
+          src: row.src_chain,
+          dst: row.dst_chain,
+          asset: row.asset,
+          amountTier: row.amount_tier,
+        });
+      }
+      routeMap.get(key)!.push({
+        bridge: row.bridge,
+        source: row.source,
+        output_usd: row.output_usd,
+        input_usd: row.input_usd,
+        total_fee_bps: row.total_fee_bps,
+        estimated_seconds: row.estimated_seconds,
+        ts: row.ts,
+      });
+    }
 
-    return reply.send({ opportunities, total });
+    // ── Compute per-route status and filter ────────────────────────────────
+    const opportunities: Array<{
+      src: string; dst: string; asset: string; amountTier: number;
+      spreadBps: number; bestBridge: string | null; worstBridge: string | null;
+      bestOutputUsd: string | null; worstOutputUsd: string | null;
+      quoteCount: number; lastSeen: string | null;
+    }> = [];
+
+    for (const [key, rows] of routeMap) {
+      const meta = routeMeta.get(key)!;
+      const refreshTier = getRouteTier(meta.src, meta.dst);
+      const {
+        state, bestBridge, worstBridge, bestOutputUsd, worstOutputUsd,
+        spreadBps, bestFeeBps, quoteCount, lastSeen,
+      } = computeRouteStatus(rows, refreshTier);
+
+      // Only include live routes with meaningful spread and reasonable fee
+      if (state !== 'active' && state !== 'single-bridge') continue;
+      if ((spreadBps ?? 0) < minSpreadBps) continue;
+      if (bestFeeBps == null || bestFeeBps >= 1000) continue;
+
+      opportunities.push({
+        src: meta.src,
+        dst: meta.dst,
+        asset: meta.asset,
+        amountTier: meta.amountTier,
+        spreadBps: spreadBps ?? 0,
+        bestBridge,
+        worstBridge,
+        bestOutputUsd,
+        worstOutputUsd,
+        quoteCount,
+        lastSeen: lastSeen?.toISOString() ?? null,
+      });
+    }
+
+    // Sort by spread DESC (largest arbitrage first)
+    opportunities.sort((a, b) => b.spreadBps - a.spreadBps);
+    const total = opportunities.length;
+
+    const payload = { opportunities, total };
+    cache.set(cacheKey, { payload, expiresAt: Date.now() + CACHE_TTL_MS });
+
+    return reply.send({
+      opportunities: opportunities.slice(0, limit),
+      total,
+    });
   });
 }

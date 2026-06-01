@@ -28,22 +28,10 @@ export async function fetchMatrix(
     bestFeeBps: number | null;
     bestBridge: string | null;
     quoteCount: number;
-    lastSeen: string | null;
   }>;
   stats: { active: number; dead: number; stale: number; singleBridge: number };
 }> {
   const res = await fetch(`${BASE}/api/matrix?asset=${asset}&tier=${tier}`);
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
-  return res.json();
-}
-
-export async function fetchOpportunities(
-  limit = 20,
-  minSpreadBps = 0
-): Promise<{ opportunities: unknown[]; total: number }> {
-  const res = await fetch(
-    `${BASE}/api/opportunities?limit=${limit}&minSpreadBps=${minSpreadBps}`
-  );
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
@@ -119,18 +107,3 @@ export async function fetchHistory(
   return res.json();
 }
 
-export interface InsightsData {
-  generatedAt: string;
-  bestRoute: { src: string; dst: string; asset: string; feeBps: number; bridge: string } | null;
-  worstRoute: { src: string; dst: string; asset: string; feeBps: number; bridge: string } | null;
-  biggestSpreads: Array<{ src: string; dst: string; asset: string; spreadBps: number; bridge: string; quoteCount: number }>;
-  routeHealth: { active: number; dead: number; stale: number; singleBridge: number };
-  bridgeDominance: Array<{ bridge: string; wins: number }>;
-  monopolyRouteCount: number;
-}
-
-export async function fetchInsights(): Promise<InsightsData> {
-  const res = await fetch(`${BASE}/api/insights/daily`);
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
-  return res.json();
-}

@@ -2,6 +2,7 @@ import format from 'pg-format';
 import type { NormalizedQuote, FetchLogEntry, RouteStatus, Asset } from '../types/index.js';
 import { getRouteTier } from '../config/routes.js';
 import { pool, query, getClient } from './connection.js';
+import { selectBestQuote, selectWorstQuote, computeSpreadBps, reRankQuotes } from '../lib/quoteRanking.js';
 
 /** Insert multiple quotes in one batch. Returns number of rows inserted. */
 export async function insertQuotesBatch(quotes: NormalizedQuote[]): Promise<number> {
@@ -100,20 +101,155 @@ export async function upsertRouteLatest(quotes: NormalizedQuote[]): Promise<void
 }
 
 /** Stale thresholds by refresh tier (CLAUDE.md): T1 > 3min, T2 > 6min, T3 > 15min */
-const STALE_THRESHOLD_MS: Record<1 | 2 | 3, number> = {
+export const STALE_THRESHOLD_MS: Record<1 | 2 | 3, number> = {
   1: 3 * 60 * 1000,   // 3 min
   2: 6 * 60 * 1000,   // 6 min
   3: 15 * 60 * 1000,  // 15 min
 };
 
+/** A single row from route_latest as consumed by computeRouteStatus. */
+export interface RouteLatestInput {
+  bridge: string;
+  source: string;
+  output_usd: string;
+  input_usd: string;
+  total_fee_bps: number;
+  estimated_seconds?: number;
+  ts: Date;
+}
+
+/** The computed values written into route_status. */
+export interface ComputedRouteStatus {
+  state: 'active' | 'dead' | 'stale' | 'single-bridge';
+  lastSeen: Date | null;
+  quoteCount: number;
+  bridgeCount: number;
+  bestBridge: string | null;
+  worstBridge: string | null;
+  bestOutputUsd: string | null;
+  worstOutputUsd: string | null;
+  /** null when route is stale — never show stale fees on the matrix. */
+  bestFeeBps: number | null;
+  spreadBps: number | null;
+}
+
+/**
+ * Pure function: compute route_status fields from raw route_latest rows.
+ *
+ * Design rules:
+ * 1. STATE is driven by the most-recent quote timestamp vs the tier threshold.
+ *    (freshRows are used only for state, not for ranking.)
+ * 2. BEST BRIDGE is the canonical winner across ALL valid rows — not filtered by
+ *    freshness — so it matches what /api/quotes returns as row[0].
+ *    "Valid" means: output_usd > 0.01 AND total_fee_bps ≤ 1000.
+ * 3. bestFeeBps is always computed when a best row exists (stale or not) — the
+ *    matrix shows the last known fee for stale routes in a dimmed colour.
+ *    It is the stored total_fee_bps of the best quote, clamped to ≥ 0. When
+ *    storedFee = 0 the fee is derived from (input − output) / input.
+ *    Negative values (output > input) are clamped to 0.
+ * 4. SPREAD is computed from all valid rows (best vs worst).
+ *
+ * Exported so it can be unit-tested without a database.
+ */
+export function computeRouteStatus(
+  rows: RouteLatestInput[],
+  refreshTier: 1 | 2 | 3,
+  now: Date = new Date()
+): ComputedRouteStatus {
+  const thresholdMs = STALE_THRESHOLD_MS[refreshTier];
+
+  // ── Valid rows: filter out garbage (broken output / fee outliers) ──────────
+  const validRows = rows.filter(
+    (r) => Number(r.output_usd) > 0.01 && (r.total_fee_bps == null || r.total_fee_bps <= 1000)
+  );
+
+  // ── Basic counts (all rows, including invalid — counts reflect DB reality) ─
+  const quoteCount = rows.length;
+  const bridgeCount = new Set(rows.map((r) => r.bridge)).size;
+  const lastSeen = quoteCount > 0
+    ? rows.reduce((newest, r) => (r.ts > newest ? r.ts : newest), rows[0].ts)
+    : null;
+
+  // ── State — driven by freshness of the most-recent quote ──────────────────
+  // bridgeCount uses ALL rows (fresh + stale): it reflects whether the route
+  // has ever had multiple bridges quoting (competition vs monopoly).
+  let state: ComputedRouteStatus['state'];
+  if (quoteCount === 0) {
+    state = 'dead';
+  } else if (lastSeen && (now.getTime() - lastSeen.getTime()) > thresholdMs) {
+    state = 'stale';
+  } else if (bridgeCount === 1) {
+    state = 'single-bridge';
+  } else {
+    state = 'active';
+  }
+
+  // ── Best / worst selection from ALL valid rows ─────────────────────────────
+  // RouteLatestInput uses snake_case (output_usd, total_fee_bps) but the
+  // canonical helpers expect camelCase RankableQuote. Map once here.
+  const rankable = validRows.map((r) => ({
+    bridge: r.bridge,
+    source: r.source,
+    outputUsd: r.output_usd,                       // output_usd → outputUsd
+    totalFeeBps: r.total_fee_bps,                  // total_fee_bps → totalFeeBps
+    estimatedSeconds: r.estimated_seconds ?? 0,    // optional field
+  }));
+
+  const bestRanked = selectBestQuote(rankable);
+  const worstRanked = selectWorstQuote(rankable);
+
+  // Resolve back to original rows (bridge+source is unique per route_latest PK)
+  const bestRow = bestRanked
+    ? (validRows.find((r) => r.bridge === bestRanked.bridge && r.source === bestRanked.source) ?? null)
+    : null;
+  const worstRow = worstRanked
+    ? (validRows.find((r) => r.bridge === worstRanked.bridge && r.source === worstRanked.source) ?? null)
+    : null;
+
+  const bestBridge = bestRow?.bridge ?? null;
+  const worstBridge = worstRow?.bridge ?? null;
+  const bestOutputUsd = bestRow?.output_usd ?? null;
+  const worstOutputUsd = worstRow?.output_usd ?? null;
+
+  // ── bestFeeBps — always computed when a best row exists (stale or not) ─────
+  let bestFeeBps: number | null = null;
+  if (bestRow) {
+    const storedFee = bestRow.total_fee_bps;
+    const inputUsd = Number(bestRow.input_usd ?? 0);
+    if (storedFee != null && storedFee > 0) {
+      bestFeeBps = storedFee;
+    } else {
+      // storedFee = 0 or null → derive from output delta; clamp to ≥ 0 so
+      // a positive-output route never shows as a "negative fee".
+      bestFeeBps = inputUsd > 0 && Number(bestOutputUsd) > 0
+        ? Math.max(0, Math.round((10000 * (inputUsd - Number(bestOutputUsd))) / inputUsd))
+        : 0;
+    }
+  }
+
+  // ── Spread — null when stale; 0 when only one valid row ──────────────────
+  let spreadBps: number | null = null;
+  if (state !== 'stale' && bestOutputUsd != null && worstOutputUsd != null) {
+    spreadBps = computeSpreadBps(Number(bestOutputUsd), Number(worstOutputUsd));
+  }
+
+  return {
+    state,
+    lastSeen,
+    quoteCount,
+    bridgeCount,
+    bestBridge,
+    worstBridge,
+    bestOutputUsd,
+    worstOutputUsd,
+    bestFeeBps,
+    spreadBps,
+  };
+}
+
 /**
  * Compute state and spread from route_latest (not just current cycle),
  * then upsert route_status.
- *
- * Key insight: if the current fetch cycle returns 0 quotes for a route,
- * that does NOT mean the route is dead — route_latest may still have
- * recent data from a previous cycle. We use route_latest as the source
- * of truth for state computation.
  */
 export async function updateRouteStatus(
   src: string,
@@ -124,121 +260,24 @@ export async function updateRouteStatus(
 ): Promise<void> {
   const refreshTier = getRouteTier(src, dst);
 
-  // Query route_latest for ALL known quotes for this route (from any cycle)
-  const latestResult = await pool.query<{
-    bridge: string;
-    source: string;
-    output_usd: string;
-    input_usd: string;
-    total_fee_bps: number;
-    ts: Date;
-  }>(
+  const latestResult = await pool.query<RouteLatestInput>(
     `SELECT bridge, source, output_usd, input_usd, total_fee_bps, ts
      FROM route_latest
      WHERE src_chain = $1 AND dst_chain = $2 AND asset = $3 AND amount_tier = $4`,
     [src, dst, asset, tier]
   );
 
-  const latestRows = latestResult.rows;
-  const bridgeCount = new Set(latestRows.map((r) => r.bridge)).size;
-  const quoteCount = latestRows.length;
-
-  // Find the most recent timestamp across all bridges for this route
-  const lastSeen = latestRows.length > 0
-    ? latestRows.reduce((newest, r) => (r.ts > newest ? r.ts : newest), latestRows[0].ts)
-    : null;
-
-  // Determine state based on route_latest data
-  let state: 'active' | 'dead' | 'stale' | 'single-bridge';
-  if (quoteCount === 0) {
-    state = 'dead';
-  } else if (bridgeCount === 1) {
-    state = 'single-bridge';
-  } else {
-    state = 'active';
-  }
-
-  // Check staleness against the most recent data
-  if (state !== 'dead' && lastSeen) {
-    const ageMs = Date.now() - lastSeen.getTime();
-    if (ageMs > STALE_THRESHOLD_MS[refreshTier]) {
-      state = 'stale';
-    }
-  }
-
-  let spreadBps: number | null = null;
-  let bestFeeBps: number | null = null;
-  let bestOutputUsd: string | null = null;
-  let worstOutputUsd: string | null = null;
-  let bestBridge: string | null = null;
-
-  if (latestRows.length > 0) {
-    // Filter out zero/negative output quotes — these are broken/stale and skew spread
-    const validRows = latestRows.filter((r) => Number(r.output_usd) > 0.01);
-
-    const best = latestRows.reduce((a, b) =>
-      Number(b.output_usd) > Number(a.output_usd) ? b : a
-    );
-    bestBridge = best.bridge;
-    bestOutputUsd = best.output_usd;
-
-    // For worst, only consider rows that are:
-    //  - non-zero output (not broken)
-    //  - reasonable fee (≤1000 bps = ≤10%) — same threshold as recalcUsd MAX_FEE_BPS
-    //  - recently fetched (within 3× the stale threshold) to exclude ghost quotes from
-    //    aggregators that had a bad cycle hours ago and haven't been called since
-    const staleMs = STALE_THRESHOLD_MS[refreshTier] * 3;
-    const freshValidRows = latestRows.filter((r) => {
-      if (Number(r.output_usd) <= 0.01) return false;
-      if (r.total_fee_bps != null && r.total_fee_bps > 1000) return false;
-      const ageMs = Date.now() - new Date(r.ts).getTime();
-      return ageMs <= staleMs;
-    });
-
-    if (freshValidRows.length > 0) {
-      const worst = freshValidRows.reduce((a, b) =>
-        Number(b.output_usd) < Number(a.output_usd) ? b : a
-      );
-      worstOutputUsd = worst.output_usd;
-    } else if (validRows.length > 0) {
-      // Fallback: use all valid rows if no fresh ones exist
-      const worst = validRows.reduce((a, b) =>
-        Number(b.output_usd) < Number(a.output_usd) ? b : a
-      );
-      worstOutputUsd = worst.output_usd;
-    } else {
-      worstOutputUsd = bestOutputUsd;
-    }
-
-    // Use total_fee_bps when present; otherwise derive from (input - output) / input
-    const storedFee = best.total_fee_bps;
-    const inputUsd = Number(best.input_usd ?? 0);
-    if (storedFee != null && storedFee > 0) {
-      bestFeeBps = storedFee;
-    } else if (inputUsd > 0 && Number(bestOutputUsd) > 0) {
-      bestFeeBps = Math.round((10000 * (inputUsd - Number(bestOutputUsd))) / inputUsd);
-    }
-    // When we have quotes but couldn't compute fee, use 0 so matrix shows a value instead of dash
-    if (bestFeeBps == null) bestFeeBps = 0;
-    // Only compute spread when the best quote is reasonable (< 10% loss vs input).
-    // Routes where best output is far below input are broken, not arbitrage opportunities.
-    const bestIsReasonable = bestFeeBps != null && bestFeeBps < 1000;
-
-    if (bestIsReasonable && Number(bestOutputUsd) > 0 && freshValidRows.length > 1) {
-      spreadBps = Math.round(
-        (10000 * (Number(bestOutputUsd) - Number(worstOutputUsd))) / Number(bestOutputUsd)
-      );
-    } else {
-      spreadBps = 0;
-    }
-  }
+  const {
+    state, lastSeen, quoteCount, bridgeCount,
+    bestBridge, worstBridge, bestOutputUsd, worstOutputUsd, bestFeeBps, spreadBps,
+  } = computeRouteStatus(latestResult.rows, refreshTier);
 
   await pool.query(
     `INSERT INTO route_status (
       src_chain, dst_chain, asset, amount_tier,
-      state, last_seen, quote_count, bridge_count, best_bridge,
+      state, last_seen, quote_count, bridge_count, best_bridge, worst_bridge,
       best_output_usd, worst_output_usd, spread_bps, best_fee_bps, refresh_tier
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
     ON CONFLICT (src_chain, dst_chain, asset, amount_tier)
     DO UPDATE SET
       state = EXCLUDED.state,
@@ -246,6 +285,7 @@ export async function updateRouteStatus(
       quote_count = EXCLUDED.quote_count,
       bridge_count = EXCLUDED.bridge_count,
       best_bridge = EXCLUDED.best_bridge,
+      worst_bridge = EXCLUDED.worst_bridge,
       best_output_usd = EXCLUDED.best_output_usd,
       worst_output_usd = EXCLUDED.worst_output_usd,
       spread_bps = EXCLUDED.spread_bps,
@@ -261,6 +301,7 @@ export async function updateRouteStatus(
       quoteCount,
       bridgeCount,
       bestBridge,
+      worstBridge,
       bestOutputUsd,
       worstOutputUsd,
       spreadBps,
@@ -291,7 +332,14 @@ interface RouteLatestRow {
   spread_bps: number | null;
 }
 
-/** Get best quotes for a route from route_latest, ordered by output_usd DESC. */
+/**
+ * Get quotes for a route from route_latest, re-ranked globally at query time.
+ *
+ * Stored rank/spreadBps in route_latest are batch-local (computed per aggregator
+ * run) and can make multiple quotes appear as "BEST". This function recomputes
+ * canonical rank and spreadBps from the actual sorted results so Explorer
+ * always shows exactly one BEST badge and correct relative spreads.
+ */
 export async function getQuotesForRoute(
   src: string,
   dst: string,
@@ -303,12 +351,11 @@ export async function getQuotesForRoute(
             input_amount, output_amount, output_usd, input_usd, gas_cost_usd, total_fee_bps, total_fee_usd,
             estimated_seconds, rank_by_output, spread_bps
      FROM route_latest
-     WHERE src_chain = $1 AND dst_chain = $2 AND asset = $3 AND amount_tier = $4
-     ORDER BY output_usd DESC`,
+     WHERE src_chain = $1 AND dst_chain = $2 AND asset = $3 AND amount_tier = $4`,
     [src, dst, asset, tier]
   );
 
-  return result.rows.map((row: RouteLatestRow) => ({
+  const quotes: NormalizedQuote[] = result.rows.map((row: RouteLatestRow) => ({
     batchId: row.batch_id,
     ts: row.ts,
     srcChain: row.src_chain,
@@ -328,9 +375,14 @@ export async function getQuotesForRoute(
     estimatedSeconds: row.estimated_seconds,
     isMultihop: false,
     steps: 1,
-    rank: row.rank_by_output ?? undefined,
-    spreadBps: row.spread_bps ?? undefined,
+    // rank and spreadBps are recomputed below — do not use stored values
+    rank: undefined,
+    spreadBps: undefined,
   }));
+
+  // Re-rank globally using the canonical comparator (highest output wins).
+  // This replaces batch-local stored rank/spreadBps with correct global values.
+  return reRankQuotes(quotes);
 }
 
 interface RouteStatusRow {
@@ -458,4 +510,19 @@ export async function getRouteLatestMaxTs(): Promise<
     'SELECT src_chain, dst_chain, MAX(ts) AS last_ts FROM route_latest GROUP BY src_chain, dst_chain'
   );
   return result.rows;
+}
+
+/**
+ * Returns true if there are any quotes newer than `withinMs` milliseconds.
+ * Used by the scheduler to skip the Squid sweep on restart when fresh data
+ * already exists (avoids thundering-herd rate-limit blowout on redeploy).
+ */
+export async function hasRecentQuotes(withinMs: number): Promise<boolean> {
+  const result = await query<{ exists: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM route_latest WHERE ts > NOW() - $1::interval
+     ) AS exists`,
+    [`${withinMs} milliseconds`]
+  );
+  return result.rows[0]?.exists ?? false;
 }

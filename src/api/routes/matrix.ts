@@ -1,7 +1,10 @@
 import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
 import { z } from 'zod';
 import { HEATMAP_ORDER } from '../../config/chains.js';
+import { getRouteTier } from '../../config/routes.js';
 import { pool } from '../../db/connection.js';
+import { computeRouteStatus } from '../../db/queries.js';
+import type { RouteLatestInput } from '../../db/queries.js';
 import { logger } from '../../lib/logger.js';
 
 /** Expected heatmap cell count: chains × (chains-1) excluding self. */
@@ -11,6 +14,14 @@ const querySchema = z.object({
   asset: z.enum(['ETH', 'USDC', 'USDT']),
   tier: z.enum(['50', '1000', '50000']),
 });
+
+/** In-memory cache: avoid hammering the DB on every matrix load. */
+interface CacheEntry {
+  payload: unknown;
+  expiresAt: number;
+}
+const CACHE_TTL_MS = 20_000; // 20 s — fresh enough, fast enough
+const cache = new Map<string, CacheEntry>();
 
 export default async function matrixRoutes(
   app: FastifyInstance,
@@ -23,25 +34,97 @@ export default async function matrixRoutes(
     }
     const { asset, tier } = parsed.data;
     const tierNum = parseInt(tier, 10);
+    const cacheKey = `${asset}:${tier}`;
 
+    // ── Serve from cache if fresh ───────────────────────────────────────────
+    const cached = cache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return reply.send(cached.payload);
+    }
+
+    // ── Query route_latest directly ─────────────────────────────────────────
+    // Reading from route_latest (not route_status) ensures the matrix shows the
+    // same canonical best bridge as /api/quotes, without the staleness lag of
+    // the pre-computed route_status table.
     const result = await pool.query<{
       src_chain: string;
       dst_chain: string;
-      state: string;
-      last_seen: Date | null;
-      quote_count: number;
-      best_bridge: string | null;
-      best_fee_bps: number | null;
-      spread_bps: number | null;
+      bridge: string;
+      source: string;
+      output_usd: string;
+      input_usd: string;
+      total_fee_bps: number;
+      estimated_seconds: number;
+      ts: Date;
     }>(
-      'SELECT src_chain, dst_chain, state, last_seen, quote_count, best_bridge, best_fee_bps, spread_bps FROM route_status WHERE asset = $1 AND amount_tier = $2',
+      `SELECT src_chain, dst_chain, bridge, source, output_usd, input_usd,
+              total_fee_bps, estimated_seconds, ts
+       FROM route_latest WHERE asset = $1 AND amount_tier = $2`,
       [asset, tierNum]
     );
-    const byKey = new Map<string, (typeof result.rows)[0]>();
+
+    // ── Group rows by src:dst ──────────────────────────────────────────────
+    const routeMap = new Map<string, RouteLatestInput[]>();
     for (const row of result.rows) {
-      byKey.set(`${row.src_chain}:${row.dst_chain}`, row);
+      const key = `${row.src_chain}:${row.dst_chain}`;
+      if (!routeMap.has(key)) routeMap.set(key, []);
+      routeMap.get(key)!.push({
+        bridge: row.bridge,
+        source: row.source,
+        output_usd: row.output_usd,
+        input_usd: row.input_usd,
+        total_fee_bps: row.total_fee_bps,
+        estimated_seconds: row.estimated_seconds,
+        ts: row.ts,
+      });
     }
 
+    // ── Fallback: for routes with no data at requested tier, use any tier ──
+    // Identifies dead-for-this-tier routes and fetches the most recent row
+    // from route_latest regardless of amount_tier, so the matrix always shows
+    // the last quote we ever saw rather than a blank.
+    const deadKeys: string[] = [];
+    for (const src of HEATMAP_ORDER) {
+      for (const dst of HEATMAP_ORDER) {
+        if (src !== dst && !routeMap.has(`${src}:${dst}`)) {
+          deadKeys.push(`${src}:${dst}`);
+        }
+      }
+    }
+
+    if (deadKeys.length > 0) {
+      const fallbackResult = await pool.query<{
+        src_chain: string; dst_chain: string; bridge: string; source: string;
+        output_usd: string; input_usd: string; total_fee_bps: number;
+        estimated_seconds: number; ts: Date;
+      }>(
+        `SELECT DISTINCT ON (src_chain, dst_chain)
+                src_chain, dst_chain, bridge, source, output_usd, input_usd,
+                total_fee_bps, estimated_seconds, ts
+         FROM route_latest
+         WHERE asset = $1
+           AND concat(src_chain, ':', dst_chain) = ANY($2::text[])
+         ORDER BY src_chain, dst_chain, ts DESC`,
+        [asset, deadKeys]
+      );
+      for (const row of fallbackResult.rows) {
+        const key = `${row.src_chain}:${row.dst_chain}`;
+        // Only fill in if still empty (primary tier query might have missed some)
+        if (!routeMap.has(key)) {
+          routeMap.set(key, [{
+            bridge: row.bridge,
+            source: row.source,
+            output_usd: row.output_usd,
+            input_usd: row.input_usd,
+            total_fee_bps: row.total_fee_bps,
+            estimated_seconds: row.estimated_seconds,
+            ts: row.ts,
+          }]);
+        }
+      }
+    }
+
+    // ── Build cells ─────────────────────────────────────────────────────────
     const cells: Array<{
       src: string;
       dst: string;
@@ -49,32 +132,25 @@ export default async function matrixRoutes(
       bestFeeBps: number | null;
       bestBridge: string | null;
       quoteCount: number;
-      lastSeen: string | null;
     }> = [];
     let active = 0;
     let dead = 0;
     let stale = 0;
     let singleBridge = 0;
+
     for (const src of HEATMAP_ORDER) {
       for (const dst of HEATMAP_ORDER) {
         if (src === dst) continue;
-        const row = byKey.get(`${src}:${dst}`);
-        const state = row?.state ?? 'dead';
+        const rows = routeMap.get(`${src}:${dst}`) ?? [];
+        const refreshTier = getRouteTier(src, dst);
+        const { state, bestBridge, bestFeeBps, quoteCount } = computeRouteStatus(rows, refreshTier);
+
         if (state === 'active') active++;
         else if (state === 'dead') dead++;
         else if (state === 'stale') stale++;
         else if (state === 'single-bridge') singleBridge++;
-        // Use spread_bps as fallback when best_fee_bps is null — fills more cells with data
-        const displayBps = row?.best_fee_bps ?? row?.spread_bps ?? null;
-        cells.push({
-          src,
-          dst,
-          state,
-          bestFeeBps: displayBps,
-          bestBridge: row?.best_bridge ?? null,
-          quoteCount: row?.quote_count ?? 0,
-          lastSeen: row?.last_seen?.toISOString() ?? null,
-        });
+
+        cells.push({ src, dst, state, bestFeeBps, bestBridge, quoteCount });
       }
     }
 
@@ -85,12 +161,17 @@ export default async function matrixRoutes(
       );
     }
 
-    return reply.send({
+    const payload = {
       asset,
       amountTier: tierNum,
       chains: [...HEATMAP_ORDER],
       cells,
       stats: { active, dead, stale, singleBridge },
-    });
+    };
+
+    // ── Store in cache ─────────────────────────────────────────────────────
+    cache.set(cacheKey, { payload, expiresAt: Date.now() + CACHE_TTL_MS });
+
+    return reply.send(payload);
   });
 }

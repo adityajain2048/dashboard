@@ -354,7 +354,7 @@ export function RouteExplorer({ asset, tier, selectedRoute }: RouteExplorerProps
 
                 {/* Spread */}
                 <div style={{ flex: 1, textAlign: 'right' }}>
-                  {q.spreadBps === 0 || q.rank === 1 ? (
+                  {i === 0 ? (
                     <span style={{ fontSize: 10, color: '#6CF9D8', background: '#6CF9D815', padding: '2px 8px', borderRadius: 4, fontWeight: 700 }}>BEST</span>
                   ) : (
                     <span style={{ fontSize: 11, color: spread.color, fontWeight: 600 }}>{spread.text}</span>

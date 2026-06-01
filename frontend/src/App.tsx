@@ -1,10 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { fetchHealth, fetchOpportunities } from './api/client';
+import { fetchHealth } from './api/client';
 import { AssetIcon } from './components/AssetIcon';
-import { InsightsCard } from './components/InsightsCard';
 import { RouteExplorer } from './views/RouteExplorer';
 import { Heatmap } from './views/Heatmap';
-import { Opportunities } from './views/Opportunities';
 import { HEATMAP_ORDER } from './config/chains';
 
 const ASSETS = ['ETH', 'USDC', 'USDT'] as const;
@@ -14,11 +12,10 @@ const TIERS: Array<{ key: number; label: string }> = [
   { key: 50000, label: '$50K' },
 ];
 
-type Tab = 'explorer' | 'matrix' | 'insights';
+type Tab = 'explorer' | 'matrix';
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: 'explorer', label: 'Explorer' },
   { key: 'matrix', label: 'Matrix' },
-  { key: 'insights', label: 'Insights' },
 ];
 
 interface HealthData {
@@ -27,24 +24,14 @@ interface HealthData {
   db: { connected: boolean; quoteCount: number; oldestQuote: string | null };
 }
 
-interface TopOpp {
-  src: string;
-  dst: string;
-  spreadBps: number;
-  bestBridge: string | null;
-  worstBridge: string | null;
-}
-
 function App() {
   const [asset, setAsset] = useState<string>('USDC');
   const [tier, setTier] = useState<number>(1000);
   const [health, setHealth] = useState<HealthData | null>(null);
   const [lastUpdate, setLastUpdate] = useState<number>(0);
-  const [topOpp, setTopOpp] = useState<TopOpp | null>(null);
   const [selectedRoute, setSelectedRoute] = useState<{ src: string; dst: string } | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('explorer');
 
-  // Poll health
   useEffect(() => {
     const poll = () => {
       fetchHealth()
@@ -56,21 +43,6 @@ function App() {
     return () => clearInterval(id);
   }, []);
 
-  // Poll top opportunity
-  useEffect(() => {
-    const poll = () => {
-      fetchOpportunities(1, 0)
-        .then((r) => {
-          const opp = r.opportunities[0] as TopOpp | undefined;
-          if (opp) setTopOpp(opp);
-        })
-        .catch(() => {/* ignore */});
-    };
-    poll();
-    const id = setInterval(poll, 30_000);
-    return () => clearInterval(id);
-  }, []);
-
   const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
     if (!lastUpdate) return;
@@ -79,12 +51,6 @@ function App() {
   }, [lastUpdate]);
 
   const handleCellClick = useCallback((src: string, dst: string) => {
-    setSelectedRoute({ src, dst });
-    setActiveTab('explorer');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, []);
-
-  const handleRouteClick = useCallback((src: string, dst: string) => {
     setSelectedRoute({ src, dst });
     setActiveTab('explorer');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -111,7 +77,6 @@ function App() {
 
           {/* Center: Asset + Tier pills */}
           <div className="flex items-center gap-6">
-            {/* Asset */}
             <div className="flex items-center gap-1" style={{ background: '#1a1a2e', borderRadius: 8, padding: 3 }}>
               {ASSETS.map(a => (
                 <button
@@ -134,7 +99,6 @@ function App() {
               ))}
             </div>
 
-            {/* Tier */}
             <div className="flex items-center gap-1" style={{ background: '#1a1a2e', borderRadius: 8, padding: 3 }}>
               {TIERS.map(t => (
                 <button
@@ -184,34 +148,17 @@ function App() {
               {t.label}
             </button>
           ))}
-
-          {/* Top opportunity hint in tab bar */}
-          {topOpp && (
-            <div style={{ marginLeft: 'auto', fontSize: 9, color: '#F59E0B' }}>
-              Top opp: {topOpp.src} &rarr; {topOpp.dst} &middot; {topOpp.spreadBps} bps
-            </div>
-          )}
         </div>
       </div>
 
       {/* ═══ MAIN CONTENT ═══ */}
       {activeTab === 'matrix' ? (
-        /* Matrix: full-screen, no max-width, minimal padding so the grid uses all available space */
         <div style={{ padding: '12px 8px' }}>
           <Heatmap asset={asset} tier={tier} onCellClick={handleCellClick} />
         </div>
       ) : (
         <div style={{ maxWidth: 1440, margin: '0 auto', padding: '20px 24px' }}>
-          {activeTab === 'explorer' && (
-            <>
-              <InsightsCard />
-              <RouteExplorer asset={asset} tier={tier} selectedRoute={selectedRoute} />
-            </>
-          )}
-
-          {activeTab === 'insights' && (
-            <Opportunities onRouteClick={handleRouteClick} />
-          )}
+          <RouteExplorer asset={asset} tier={tier} selectedRoute={selectedRoute} />
         </div>
       )}
     </div>

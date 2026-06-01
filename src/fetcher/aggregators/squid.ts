@@ -14,6 +14,19 @@ function getIntegratorId(): string {
   return process.env.SQUID_INTEGRATOR_ID ?? 'bridge-dashboard-ccf44383-88be-4758-8b61-a813f76e4';
 }
 
+/** Squid global 429 cooldown — one integrator ID, so one shared backoff */
+let squidBannedUntil = 0;
+
+function setSquidCooldown(retryAfterMs: number): void {
+  squidBannedUntil = Date.now() + retryAfterMs;
+  const retryAfterSec = Math.ceil(retryAfterMs / 1000);
+  logger.warn({ retryAfterSec }, 'Squid rate-limited — cooling down');
+}
+
+function isSquidBanned(): boolean {
+  return Date.now() < squidBannedUntil;
+}
+
 // Chains confirmed NOT in Squid's chain list (checked against /v2/sdk-info)
 const SQUID_UNSUPPORTED = new Set<string>([
   'zksync',    // chainId 324 — not in Squid
@@ -153,6 +166,8 @@ const SquidRouteResponseSchema = z.object({
 // ─── Main fetcher ───
 
 export async function fetchSquid(route: RouteKey): Promise<NormalizedQuote[]> {
+  if (isSquidBanned()) return []; // cooling down — skip silently
+
   const srcChain = getChain(route.src);
   const dstChain = getChain(route.dst);
 
@@ -217,8 +232,15 @@ export async function fetchSquid(route: RouteKey): Promise<NormalizedQuote[]> {
       }
       return [];
     }
-    // 429 = rate limited — skip silently; the rate limiter will slow future calls
-    if (res.status === 429) throw new Error(`HTTP 429: ${errBody.slice(0, 120)}`);
+    // 429 = rate limited — back off and skip silently
+    if (res.status === 429) {
+      // Honour Retry-After header but enforce a 60s minimum to prevent rapid re-bans.
+      const retryHeader = res.headers.get('retry-after');
+      const headerMs = retryHeader ? parseInt(retryHeader, 10) * 1000 : 0;
+      const retryAfterMs = Math.max(headerMs, 60_000);
+      setSquidCooldown(retryAfterMs);
+      return [];
+    }
     // Squid returns 500 for thin-liquidity routes ("Low liquidity") — treat as no-route
     if (res.status === 500) {
       const lower = errBody.toLowerCase();

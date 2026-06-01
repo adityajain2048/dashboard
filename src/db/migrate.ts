@@ -39,6 +39,7 @@ const COMMON_MIGRATIONS = [
   '002_route_latest_bridge_source_pk.sql',
   '003_route_status_best_fee_bps.sql',
   '004_route_latest_input_amount.sql',
+  '005_route_status_worst_bridge.sql',
 ];
 
 async function isDbReadOnly(): Promise<boolean> {

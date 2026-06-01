@@ -62,7 +62,20 @@ const RangoResponseSchema = z.object({
   error: z.string().nullable().optional(),
 });
 
+/** Global cooldown: 403 = IP block (10 min), 429 = rate limit (2 min) */
+let rangoBannedUntil = 0;
+
+function setRangoCooldown(retryAfterMs: number, reason: string): void {
+  rangoBannedUntil = Date.now() + retryAfterMs;
+  logger.warn({ retryAfterMin: Math.ceil(retryAfterMs / 60_000), reason }, 'Rango blocked — cooling down');
+}
+
+function isRangoBanned(): boolean {
+  return Date.now() < rangoBannedUntil;
+}
+
 export async function fetchRango(route: RouteKey): Promise<NormalizedQuote[]> {
+  if (isRangoBanned()) return [];
   if (RANGO_UNSUPPORTED.has(route.src) || RANGO_UNSUPPORTED.has(route.dst)) return [];
 
   const srcToken = getToken(route.src, route.asset);
@@ -107,6 +120,17 @@ export async function fetchRango(route: RouteKey): Promise<NormalizedQuote[]> {
 
   if (!res.ok) {
     const errBody = await res.text().catch(() => '');
+    if (res.status === 403) {
+      // IP-level block (Cloudflare WAF on Azure egress) — back off 10 minutes
+      setRangoCooldown(10 * 60_000, '403 IP block');
+      return [];
+    }
+    if (res.status === 429) {
+      const retryHeader = res.headers.get('retry-after');
+      const retryAfterMs = Math.max(retryHeader ? parseInt(retryHeader, 10) * 1000 : 0, 2 * 60_000);
+      setRangoCooldown(retryAfterMs, '429 rate limit');
+      return [];
+    }
     throw new Error(`HTTP ${res.status}: ${errBody.slice(0, 100)}`);
   }
 

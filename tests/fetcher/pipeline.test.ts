@@ -5,6 +5,9 @@ import { processRoute } from '../../src/fetcher/pipeline.js';
 vi.mock('../../src/fetcher/aggregators/index.js', () => ({
   fetchAllAggregators: vi.fn(),
 }));
+vi.mock('../../src/fetcher/bridges/index.js', () => ({
+  gapFill: vi.fn().mockResolvedValue([]),
+}));
 vi.mock('../../src/db/queries.js', () => ({
   insertQuotesBatch: vi.fn(),
   upsertRouteLatest: vi.fn(),

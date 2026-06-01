@@ -16,28 +16,50 @@ interface Cell {
   bestFeeBps: number | null;
   bestBridge: string | null;
   quoteCount: number;
-  lastSeen: string | null;
 }
 
-/** Best route fee: <20 bps = green (best), 20–80 bps = yellow, >80 bps = red. */
-function getColor(cell: Cell | undefined): string {
-  if (!cell || cell.state === 'dead') return '#1a1a2e';
-  if (cell.state === 'stale') return '#422006';
+interface CellStyle {
+  background: string;
+  textColor: string | null;
+}
+
+/**
+ * Fresh cells: high-opacity colored backgrounds so they read as green/amber/red, not brown.
+ * Stale cells: neutral dark background + dim fee-colored text only (no warm tint → no brown).
+ * Dead/missing: near-transparent, no text.
+ */
+function getCellStyle(cell: Cell | undefined): CellStyle {
+  if (!cell || cell.state === 'dead') {
+    return { background: 'rgba(255,255,255,0.018)', textColor: null };
+  }
+
+  const isStale = cell.state === 'stale';
   const fee = cell.bestFeeBps ?? 0;
-  if (fee < 20) return '#059669';
-  if (fee < 80) return '#ca8a04';
-  return '#dc2626';
+
+  if (isStale) {
+    // Neutral background, fee-colored dim text: keeps meaning without any warm tint on dark.
+    if (fee < 20) return { background: 'rgba(255,255,255,0.03)', textColor: 'rgba(108,249,216,0.50)' };
+    if (fee < 80) return { background: 'rgba(255,255,255,0.03)', textColor: 'rgba(253,224,71,0.45)' };
+    return { background: 'rgba(255,255,255,0.03)', textColor: 'rgba(248,113,113,0.50)' };
+  }
+
+  // Fresh: high-opacity so the color reads clearly (amber at 70% on dark = gold, not brown).
+  if (fee < 20) return { background: 'rgba(16,185,129,0.65)', textColor: '#e0f5ef' };
+  if (fee < 80) return { background: 'rgba(251,183,5,0.72)', textColor: '#0a0a14' };
+  return { background: 'rgba(239,68,68,0.65)', textColor: '#ffe0e0' };
 }
 
-const LEGEND = [
-  { color: '#059669', label: '<0.2% fee' },
-  { color: '#ca8a04', label: '0.2–0.8% fee' },
-  { color: '#dc2626', label: '>0.8% fee' },
-  { color: '#1a1a2e', label: 'No route' },
-];
+function formatCellValue(bps: number | null): string {
+  if (bps == null || bps < 0) return '0.0%';
+  if (bps > 9999) return `${Math.round(bps / 100)}%`;
+  return `${(bps / 100).toFixed(1)}%`;
+}
 
 export function Heatmap({ asset, tier, onCellClick }: HeatmapProps) {
-  const [data, setData] = useState<{ cells: Cell[]; stats: { active: number; dead: number; stale: number; singleBridge: number } } | null>(null);
+  const [data, setData] = useState<{
+    cells: Cell[];
+    stats: { active: number; dead: number; stale: number; singleBridge: number };
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [hoveredCell, setHoveredCell] = useState<{ src: string; dst: string } | null>(null);
 
@@ -87,15 +109,6 @@ export function Heatmap({ asset, tier, onCellClick }: HeatmapProps) {
   const chains = HEATMAP_ORDER;
   const cellSize = 36;
   const rowHeaderWidth = 72;
-
-  /** Format fee in %. Negative = bridge gives rebate (show as 0.0). Hide extreme outliers. */
-  function formatCellValue(bps: number | null): string {
-    if (bps == null) return '—';
-    if (bps > 9999) return '—';
-    if (bps < 0) return '0.0';
-    return (bps / 100).toFixed(1);
-  }
-
   const gridWidth = rowHeaderWidth + chains.length * (cellSize + 2);
 
   return (
@@ -114,7 +127,7 @@ export function Heatmap({ asset, tier, onCellClick }: HeatmapProps) {
               minWidth: gridWidth,
             }}
           >
-            {/* Top-left corner — sticky */}
+            {/* Top-left corner */}
             <div style={{
               background: '#0f0f1c',
               padding: 6,
@@ -131,7 +144,7 @@ export function Heatmap({ asset, tier, onCellClick }: HeatmapProps) {
               <span style={{ fontSize: 9, color: '#666', fontWeight: 600 }}>TO →</span>
             </div>
 
-            {/* Column headers — sticky */}
+            {/* Column headers */}
             {chains.map(c => {
               const meta = getChainMeta(c);
               return (
@@ -164,7 +177,7 @@ export function Heatmap({ asset, tier, onCellClick }: HeatmapProps) {
               const fromMeta = getChainMeta(fromChain);
               return (
                 <Fragment key={fromChain}>
-                  {/* Row header — sticky */}
+                  {/* Row header */}
                   <div
                     style={{
                       background: '#0f0f1c',
@@ -189,39 +202,38 @@ export function Heatmap({ asset, tier, onCellClick }: HeatmapProps) {
                   {chains.map(toChain => {
                     const isDiag = fromChain === toChain;
                     const cell = isDiag ? undefined : cellMap.get(`${fromChain}:${toChain}`);
+                    const style = isDiag ? null : getCellStyle(cell);
+                    const hasData = !isDiag && style?.textColor != null;
                     const isHovered = hoveredCell?.src === fromChain && hoveredCell?.dst === toChain;
                     const isNewRoute = (fromMeta.isNew || getChainMeta(toChain).isNew) && !isDiag;
+                    const isClickable = !isDiag && hasData;
 
                     return (
                       <div
                         key={`cell-${fromChain}-${toChain}`}
                         onMouseEnter={() => { if (!isDiag) setHoveredCell({ src: fromChain, dst: toChain }); }}
                         onMouseLeave={() => setHoveredCell(null)}
-                        onClick={() => { if (!isDiag && cell && onCellClick) onCellClick(fromChain, toChain); }}
+                        onClick={() => { if (isClickable && onCellClick) onCellClick(fromChain, toChain); }}
                         style={{
-                          background: isDiag ? '#0a0a14' : getColor(cell),
+                          background: isDiag ? '#0a0a14' : (style?.background ?? 'rgba(255,255,255,0.018)'),
                           borderRadius: 3,
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
                           minHeight: cellSize,
                           minWidth: cellSize,
-                          cursor: !isDiag && cell ? 'pointer' : 'default',
-                          border: isHovered && !isDiag ? '2px solid #6CF9D8' : isNewRoute && cell ? '1px solid #836EF930' : '1px solid #1a1a2e',
-                          transition: 'border 0.1s, background 0.1s',
+                          cursor: isClickable ? 'pointer' : 'default',
+                          border: isHovered && !isDiag
+                            ? '2px solid #6CF9D8'
+                            : isNewRoute && hasData
+                              ? '1px solid #836EF930'
+                              : '1px solid rgba(255,255,255,0.04)',
+                          transition: 'border 0.1s',
                         }}
                       >
-                        {isDiag ? (
-                          <span style={{ fontSize: 10, color: '#333' }}>—</span>
-                        ) : !cell || cell.state === 'dead' ? (
-                          <span style={{ fontSize: 8, color: '#2a2a4a', opacity: 0.5 }}>·</span>
-                        ) : (
-                          <span style={{
-                            fontSize: 10,
-                            fontWeight: 700,
-                            color: (cell.bestFeeBps ?? 0) < 20 ? '#6CF9D8' : (cell.bestFeeBps ?? 0) < 80 ? '#facc15' : '#f87171',
-                          }}>
-                            {formatCellValue(cell.bestFeeBps)}
+                        {hasData && style?.textColor && (
+                          <span style={{ fontSize: 10, fontWeight: 700, color: style.textColor }}>
+                            {formatCellValue(cell?.bestFeeBps ?? null)}
                           </span>
                         )}
                       </div>
@@ -242,11 +254,14 @@ export function Heatmap({ asset, tier, onCellClick }: HeatmapProps) {
                 <span style={{ color: '#6CF9D8', margin: '0 6px' }}>&rarr;</span>
                 <span style={{ color: '#e0e0f0', fontWeight: 600 }}>{getChainMeta(hoveredData.dst).name}</span>
               </span>
+              {hoveredData.state === 'stale' && (
+                <span style={{ fontSize: 8, color: '#888', background: '#1a1a2e', padding: '1px 6px', borderRadius: 3, border: '1px solid #2a2a4a' }}>stale · latest known</span>
+              )}
               {hoveredData.bestBridge && (
                 <span style={{ fontSize: 9, color: '#555' }}>Best: <span style={{ color: '#6CF9D8' }}>{hoveredData.bestBridge}</span></span>
               )}
               <span style={{ fontSize: 9, color: '#555' }}>
-                Best fee: <span style={{ color: '#F59E0B' }}>{((hoveredData.bestFeeBps ?? 0) / 100).toFixed(2)}%</span>
+                Fee: <span style={{ color: '#F59E0B' }}>{((hoveredData.bestFeeBps ?? 0) / 100).toFixed(2)}%</span>
               </span>
               <span style={{ fontSize: 9, color: '#555' }}>Bridges: <span style={{ color: '#888' }}>{hoveredData.quoteCount}</span></span>
               {(getChainMeta(hoveredData.src).isNew || getChainMeta(hoveredData.dst).isNew) && (
@@ -263,31 +278,61 @@ export function Heatmap({ asset, tier, onCellClick }: HeatmapProps) {
   );
 }
 
-function SectionHeader({ asset, tier, stats }: { asset: string; tier: number; stats?: { active: number; dead: number; stale: number; singleBridge: number } }) {
+function SectionHeader({ asset, tier, stats }: {
+  asset: string;
+  tier: number;
+  stats?: { active: number; dead: number; stale: number; singleBridge: number };
+}) {
   return (
     <div className="flex items-center justify-between" style={{ marginBottom: 14 }}>
       <div className="flex items-center gap-2">
         <div style={{ width: 3, height: 16, borderRadius: 2, background: '#4F7FFF' }} />
         <span style={{ fontSize: 13, fontWeight: 700, color: '#e0e0f0', letterSpacing: '-0.3px' }}>Route Matrix</span>
         <span style={{ fontSize: 9, color: '#555', marginLeft: 8 }}>
-          Best routes (green) = low fee &middot; {asset} &middot; ${tier.toLocaleString()} tier
+          {asset} &middot; ${tier.toLocaleString()} tier
           {stats && (
-            <> &middot; <span style={{ color: '#6CF9D8' }}>{stats.active}</span> active
-              <span style={{ color: '#555' }}> / </span>
-              <span style={{ color: '#F59E0B' }}>{stats.stale}</span> stale
-              <span style={{ color: '#555' }}> / </span>
-              <span style={{ color: '#FF6B6B' }}>{stats.dead}</span> dead
+            <>
+              {' · '}
+              <span style={{ color: '#6CF9D8' }}>{stats.active}</span> fresh
+              {' / '}
+              <span style={{ color: '#888' }}>{stats.stale}</span> stale
+              {' / '}
+              <span style={{ color: '#444' }}>{stats.dead}</span> no route
             </>
           )}
         </span>
       </div>
-      <div className="flex items-center gap-2">
-        {LEGEND.map(l => (
-          <div key={l.label} className="flex items-center gap-1">
-            <div style={{ width: 10, height: 10, borderRadius: 2, background: l.color, border: '1px solid #2a2a4a' }} />
-            <span style={{ fontSize: 8, color: '#555' }}>{l.label}</span>
+
+      {/* Legend */}
+      <div className="flex items-center gap-4">
+        {/* Fresh */}
+        <div className="flex items-center gap-1.5">
+          <div style={{ display: 'flex', gap: 2 }}>
+            <div style={{ width: 9, height: 9, borderRadius: 2, background: 'rgba(16,185,129,0.65)', border: '1px solid rgba(16,185,129,0.8)' }} />
+            <div style={{ width: 9, height: 9, borderRadius: 2, background: 'rgba(251,183,5,0.72)', border: '1px solid rgba(251,183,5,0.8)' }} />
+            <div style={{ width: 9, height: 9, borderRadius: 2, background: 'rgba(239,68,68,0.65)', border: '1px solid rgba(239,68,68,0.8)' }} />
           </div>
-        ))}
+          <span style={{ fontSize: 8, color: '#666' }}>Fresh quote</span>
+        </div>
+
+        {/* Stale */}
+        <div className="flex items-center gap-1.5">
+          <div style={{
+            width: 9, height: 9, borderRadius: 2,
+            background: 'rgba(255,255,255,0.03)',
+            border: '1px solid rgba(255,255,255,0.12)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <div style={{ width: 5, height: 1.5, borderRadius: 1, background: 'rgba(108,249,216,0.45)' }} />
+          </div>
+          <span style={{ fontSize: 8, color: '#555' }}>Stale &middot; latest known data</span>
+        </div>
+
+        {/* No route */}
+        <div className="flex items-center gap-1.5">
+          <div style={{ width: 9, height: 9, borderRadius: 2, background: 'rgba(255,255,255,0.018)', border: '1px solid rgba(255,255,255,0.06)' }} />
+          <span style={{ fontSize: 8, color: '#444' }}>No route found</span>
+        </div>
       </div>
     </div>
   );

@@ -9,7 +9,7 @@ import { CHAIN_SLUGS } from '../../src/config/chains.js';
 import { TOKENS, getToken } from '../../src/config/tokens.js';
 import type { Route } from '../../src/types/index.js';
 
-const EXPECTED_ROUTES = 22 * 21; // 22 chains × 21 destinations (no self-routes)
+const EXPECTED_ROUTES = 56 * 55; // 56 chains × 55 destinations (no self-routes)
 
 describe('Route Config', () => {
   it('generates expected routes (chains × (chains-1))', () => {
@@ -44,14 +44,14 @@ describe('Route Config', () => {
 });
 
 describe('Chain Config', () => {
-  it('has exactly 22 chains', () => {
-    expect(CHAIN_SLUGS.length).toBe(22);
+  it('has exactly 56 chains', () => {
+    expect(CHAIN_SLUGS.length).toBe(56);
   });
 });
 
 describe('Token Config', () => {
-  it('has 3 entries per chain (66 total)', () => {
-    expect(TOKENS.length).toBe(66);
+  it('has 3 entries per chain (168 total)', () => {
+    expect(TOKENS.length).toBe(168);
   });
 
   it('getToken works for known chain+asset', () => {

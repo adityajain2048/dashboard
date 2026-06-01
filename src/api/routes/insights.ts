@@ -1,6 +1,9 @@
 import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
 import { query } from '../../db/connection.js';
 
+let insightsCache: { payload: unknown; expiresAt: number } | null = null;
+const INSIGHTS_TTL_MS = 30_000; // 30 s
+
 interface BestWorstRow {
   src_chain: string; dst_chain: string; asset: string;
   amount_tier: number; best_fee_bps: number; best_bridge: string;
@@ -18,6 +21,10 @@ export default async function insightsRoutes(
   _opts: FastifyPluginOptions
 ): Promise<void> {
   app.get('/insights/daily', async (_req, reply) => {
+    if (insightsCache && insightsCache.expiresAt > Date.now()) {
+      return reply.send(insightsCache.payload);
+    }
+
     const [bestRes, worstRes, spreadRes, stateRes, domRes, monoRes] = await Promise.all([
       // Best route (lowest fee)
       query<BestWorstRow>(
@@ -64,7 +71,7 @@ export default async function insightsRoutes(
     const stateMap: Record<string, number> = {};
     for (const r of stateRes.rows) stateMap[r.state] = parseInt(r.count, 10);
 
-    return reply.send({
+    const responsePayload = {
       generatedAt: new Date().toISOString(),
       bestRoute: best ? {
         src: best.src_chain, dst: best.dst_chain, asset: best.asset,
@@ -88,6 +95,9 @@ export default async function insightsRoutes(
         bridge: r.best_bridge, wins: parseInt(r.wins, 10),
       })),
       monopolyRouteCount: parseInt(monoRes.rows[0]?.count ?? '0', 10),
-    });
+    };
+
+    insightsCache = { payload: responsePayload, expiresAt: Date.now() + INSIGHTS_TTL_MS };
+    return reply.send(responsePayload);
   });
 }

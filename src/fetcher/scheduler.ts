@@ -4,12 +4,15 @@ import { processRoute } from './pipeline.js';
 import { generateBatchId, chunk } from '../lib/utils.js';
 import { logger } from '../lib/logger.js';
 import { refreshNativePrices } from '../lib/prices.js';
-import { getGapCoverage } from '../db/queries.js';
+import { getGapCoverage, hasRecentQuotes } from '../db/queries.js';
 
 // ─── Concurrency constants ────────────────────────────────────────────────────
 
-/** Sweep: high concurrency — rate limiter paces actual Squid API calls at 20/sec. */
-const SWEEP_CONCURRENCY = 150;
+/**
+ * Sweep concurrency — 20 concurrent tasks ≈ 10–15 req/s to Squid (safe for free tier).
+ * Previous value of 150 caused immediate 429 bans on every startup.
+ */
+const SWEEP_CONCURRENCY = 20;
 
 /**
  * T1 regular cycle concurrency.
@@ -339,10 +342,26 @@ async function runTierCycle(tier: 1 | 2 | 3): Promise<void> {
  * 4. Start gap-fill interval (every 10 min) for non-Squid routes.
  * 5. Start regular T1/T2/T3 refresh cycles for Squid-covered routes.
  */
+/** How fresh the DB must be to skip the Squid sweep on restart (30 minutes). */
+const SKIP_SWEEP_IF_FRESH_MS = 30 * 60_000;
+
 export function startScheduler(): void {
   logger.info({ component: 'scheduler' }, 'Scheduler starting — Squid sweep first, then periodic refresh');
 
-  runSquidSweep()
+  // Skip the sweep if the DB already has quotes fresher than 30 min.
+  // This prevents thundering-herd rate-limit blowout on container restarts / redeployments.
+  const sweepPromise = hasRecentQuotes(SKIP_SWEEP_IF_FRESH_MS).then((fresh) => {
+    if (fresh) {
+      logger.info(
+        { component: 'scheduler' },
+        'Recent quotes found in DB — skipping Squid sweep, going straight to periodic cycles'
+      );
+      return;
+    }
+    return runSquidSweep();
+  });
+
+  sweepPromise
     .then(() => {
       logger.info(
         { component: 'scheduler', gaps: squidGapKeys.size },
@@ -387,7 +406,7 @@ export function startScheduler(): void {
       }, REFRESH_INTERVALS[3]);
     })
     .catch((e) => {
-      logger.error(e, 'Squid sweep failed — starting periodic cycles immediately as fallback');
+      logger.error(e, 'Startup sequence failed — starting periodic cycles immediately as fallback');
 
       // Fallback: if sweep errors out, start normal cycles so the service isn't dead
       setTimeout(() => runTierCycle(1).catch((e2) => logger.error(e2, 'Tier 1 cycle error')), 0);

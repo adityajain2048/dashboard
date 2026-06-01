@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import compress from '@fastify/compress';
 import fastifyStatic from '@fastify/static';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -18,6 +19,9 @@ export async function buildServer(): Promise<ReturnType<typeof Fastify>> {
   await app.register(cors, {
     origin: corsOrigin ? corsOrigin.split(',').map((o) => o.trim()) : process.env.NODE_ENV === 'production' ? false : true,
   });
+
+  // Gzip all API responses — reduces matrix payload from ~380KB to ~35KB
+  await app.register(compress, { global: true });
 
   app.addHook('onRequest', (req, _reply, done) => {
     const reqId = req.id;
@@ -55,7 +59,7 @@ export async function buildServer(): Promise<ReturnType<typeof Fastify>> {
   await app.register(import('./routes/relay.js'), { prefix: '/api' });
 
   if (process.env.NODE_ENV === 'production') {
-    const frontendDist = join(__dirname, '../../frontend/dist');
+    const frontendDist = join(__dirname, '../../../frontend/dist');
     await app.register(fastifyStatic, { root: frontendDist, prefix: '/' });
     app.setNotFoundHandler((_req, reply) => {
       reply.sendFile('index.html');
