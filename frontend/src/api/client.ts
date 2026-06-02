@@ -74,6 +74,10 @@ export async function fetchBridgeWinRateByTier(): Promise<{
 export interface AggregatorHealth {
   id: string; successCount: number; errorCount: number; timeoutCount: number;
   noRouteCount: number; totalCount: number; successRate: number; avgResponseMs: number | null;
+  /** Routes where this aggregator found the single highest-output quote. */
+  wins: number;
+  /** wins as % of all contested routes. */
+  winPct: number;
 }
 
 export interface BridgeHealth {

@@ -59,7 +59,8 @@ export function Insights({ asset, tier, onOpenRoute }: InsightsProps) {
     const avgFee = cells.length ? cells.reduce((s, c) => s + (c.bestFeeBps ?? 0), 0) / cells.length : 0;
     const bridgeBoard = [...bridges].sort((a, b) => b.wins - a.wins);
     const topBridge = bridgeBoard[0] ?? null;
-    const aggBoard = [...aggregators].sort((a, b) => b.successRate - a.successRate);
+    // Sort by route wins (the meaningful metric); fall back to successRate
+    const aggBoard = [...aggregators].sort((a, b) => (b.wins ?? 0) - (a.wins ?? 0) || b.successRate - a.successRate);
     const topAgg = aggBoard[0] ?? null;
     return { corridors, avgFee, topBridge, topAgg, bridgeBoard, aggBoard };
   }, [matrix, bridges, aggregators]);
@@ -88,7 +89,7 @@ export function Insights({ asset, tier, onOpenRoute }: InsightsProps) {
             <HeroStat label="Avg best fee" value={fmtPct(kpis.avgFee)} accent="var(--squid-lime)"
               sub="across all live corridors" />
             <HeroStat label="Top aggregator" value={kpis.topAgg ? aggMeta(kpis.topAgg.id).name : '—'} accent="var(--squid-lavender)"
-              sub={kpis.topAgg ? `${kpis.topAgg.successRate}% success · ${kpis.topAgg.successCount.toLocaleString()} quotes` : 'loading…'}
+              sub={kpis.topAgg ? `${kpis.topAgg.wins.toLocaleString()} routes won · ${kpis.topAgg.winPct}% share` : 'loading…'}
               dot={kpis.topAgg ? aggMeta(kpis.topAgg.id).color : undefined} />
             <HeroStat label="Top bridge" value={kpis.topBridge ? kpis.topBridge.name : '—'} accent="var(--fg-1)"
               sub={kpis.topBridge ? `${kpis.topBridge.wins.toLocaleString()} route wins` : 'loading…'}
@@ -108,7 +109,7 @@ export function Insights({ asset, tier, onOpenRoute }: InsightsProps) {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           <Card pad={18}>
-            <SectionTitle accent="var(--squid-lavender)" sub="quote success rate · last 24h">Aggregator performance</SectionTitle>
+            <SectionTitle accent="var(--squid-lavender)" sub="routes where this aggregator found the best price">Aggregator performance</SectionTitle>
             {kpis.aggBoard.length
               ? <AggregatorBoard rows={kpis.aggBoard} />
               : <Loading label="Loading aggregators…" />}
@@ -223,27 +224,37 @@ function BridgeBoard({ rows }: { rows: BridgeCoverageItem[] }) {
   );
 }
 
-/* ─── aggregator performance (success rate) ─── */
+/* ─── aggregator performance (route wins) ─── */
 function AggregatorBoard({ rows }: { rows: AggregatorHealth[] }) {
+  const maxWins = Math.max(...rows.map((r) => r.wins ?? 0), 1);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
       {rows.map((r, i) => {
         const color = aggMeta(r.id).color;
+        const wins = r.wins ?? 0;
         return (
           <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ width: 14, fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 11, color: i === 0 ? 'var(--squid-lavender)' : 'var(--fg-3)', textAlign: 'right' }}>{i + 1}</span>
             <span style={{ width: 9, height: 9, borderRadius: 3, background: color, flexShrink: 0, boxShadow: `0 0 8px ${color}66` }} />
             <span style={{ width: 84, fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 12, color: 'var(--fg-1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{aggMeta(r.id).name}</span>
             <div style={{ flex: 1, height: 7, borderRadius: 4, background: 'var(--bg-3)', overflow: 'hidden' }}>
-              <div style={{ width: `${r.successRate}%`, height: '100%', borderRadius: 4, background: i === 0 ? 'var(--squid-lavender)' : color, opacity: i === 0 ? 1 : 0.65 }} />
+              <div style={{ width: `${(wins / maxWins) * 100}%`, height: '100%', borderRadius: 4, background: i === 0 ? 'var(--squid-lavender)' : color, opacity: i === 0 ? 1 : 0.65 }} />
             </div>
-            <span style={{ width: 38, textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 12, color: 'var(--fg-1)' }}>{r.successRate}%</span>
-            <span style={{ width: 40, textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)' }}>{r.avgResponseMs ? `${r.avgResponseMs}ms` : '—'}</span>
+            {/* primary: route wins */}
+            <span style={{ width: 36, textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 12, color: 'var(--fg-1)' }}>{wins.toLocaleString()}</span>
+            {/* secondary: win share */}
+            <span style={{ width: 38, textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)' }}>{r.winPct ?? 0}%</span>
           </div>
         );
       })}
-      <div className="t-mono-xs" style={{ color: 'var(--fg-4)', marginTop: 4, display: 'flex', justifyContent: 'space-between' }}>
-        <span>aggregator</span><span>quote success · avg latency</span>
+      <div style={{ marginTop: 10, padding: '8px 10px', background: 'var(--bg-2)', borderRadius: 'var(--r-xs)', border: '1px solid var(--line)' }}>
+        <div className="t-mono-xs" style={{ color: 'var(--fg-3)', marginBottom: 6 }}>WHAT THIS MEASURES</div>
+        <div className="t-caption" style={{ color: 'var(--fg-2)', lineHeight: 1.5 }}>
+          For each live route, the aggregator that returned the single highest output quote gets credited with a win — regardless of which bridge it used.
+        </div>
+      </div>
+      <div className="t-mono-xs" style={{ color: 'var(--fg-4)', marginTop: 2, display: 'flex', justifyContent: 'space-between' }}>
+        <span>aggregator</span><span>routes won · share</span>
       </div>
     </div>
   );

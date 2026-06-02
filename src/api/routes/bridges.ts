@@ -48,6 +48,7 @@ interface AggHealthRow {
   timeout_count: string; no_route_count: string; total_count: string;
   avg_response_ms: string | null;
 }
+interface AggWinsRow { source: string; wins: string; }
 interface BridgeLivenessRow {
   bridge: string; active_quotes: string; corridors: string; last_seen: string | null;
 }
@@ -220,7 +221,7 @@ export default async function bridgesRoutes(
 
   // ─── GET /bridges/health ───
   app.get('/bridges/health', async (_req, reply) => {
-    const [aggRes, livenessRes] = await Promise.all([
+    const [aggRes, livenessRes, winsRes] = await Promise.all([
       query<AggHealthRow>(
         `SELECT source,
            COUNT(*) FILTER (WHERE status = 'success') AS success_count,
@@ -240,10 +241,38 @@ export default async function bridgesRoutes(
          FROM route_latest
          GROUP BY bridge`
       ),
+      // For each live route, find the single quote with the highest output_usd
+      // (across all bridges and sources). Credit the aggregator that sourced it.
+      // This answers: "which aggregator consistently finds the best price?"
+      query<AggWinsRow>(
+        `WITH best_per_route AS (
+           SELECT DISTINCT ON (rl.src_chain, rl.dst_chain, rl.asset, rl.amount_tier)
+             rl.source
+           FROM route_latest rl
+           JOIN route_status rs
+             ON  rs.src_chain   = rl.src_chain
+             AND rs.dst_chain   = rl.dst_chain
+             AND rs.asset       = rl.asset
+             AND rs.amount_tier = rl.amount_tier
+           WHERE rs.state IN ('active', 'single-bridge')
+             AND rs.last_seen > NOW() - INTERVAL '47 minutes'
+             AND rl.output_usd::numeric > 0.01
+             AND (rl.total_fee_bps IS NULL OR rl.total_fee_bps <= 1000)
+           ORDER BY rl.src_chain, rl.dst_chain, rl.asset, rl.amount_tier,
+                    rl.output_usd::numeric DESC
+         )
+         SELECT source, COUNT(*) AS wins
+         FROM best_per_route
+         GROUP BY source
+         ORDER BY wins DESC`
+      ),
     ]);
 
     const now = Date.now();
     const STALE_MS = 15 * 60 * 1000;
+
+    const winsMap = new Map(winsRes.rows.map(r => [r.source, parseInt(r.wins, 10)]));
+    const totalWins = winsRes.rows.reduce((s, r) => s + parseInt(r.wins, 10), 0);
 
     const aggregators = aggRes.rows.map(r => {
       const successCount = parseInt(r.success_count, 10);
@@ -252,11 +281,14 @@ export default async function bridgesRoutes(
       const noRouteCount = parseInt(r.no_route_count, 10);
       const totalCount = parseInt(r.total_count, 10);
       const actionable = totalCount - noRouteCount;
+      const wins = winsMap.get(r.source) ?? 0;
       return {
         id: r.source,
         successCount, errorCount, timeoutCount, noRouteCount, totalCount,
         successRate: actionable > 0 ? Math.round(successCount / actionable * 1000) / 10 : 0,
         avgResponseMs: r.avg_response_ms ? Math.round(parseFloat(r.avg_response_ms)) : null,
+        wins,
+        winPct: totalWins > 0 ? Math.round(wins / totalWins * 1000) / 10 : 0,
       };
     });
 
