@@ -4,7 +4,7 @@ import { processRoute } from './pipeline.js';
 import { generateBatchId, chunk } from '../lib/utils.js';
 import { logger } from '../lib/logger.js';
 import { refreshNativePrices } from '../lib/prices.js';
-import { getGapCoverage, hasRecentQuotes } from '../db/queries.js';
+import { getGapCoverage, hasRecentQuotes, getSquidGapKeys } from '../db/queries.js';
 
 // ─── Concurrency constants ────────────────────────────────────────────────────
 
@@ -55,6 +55,43 @@ const squidGapKeys = new Set<string>();
 
 function makeTaskKey(src: string, dst: string, asset: string, amountTier: number): string {
   return `${src}:${dst}:${asset}:${amountTier}`;
+}
+
+// ─── Gap key helpers ──────────────────────────────────────────────────────────
+
+/** Build the flat list of all task keys (src:dst:asset:amountTier) across every route. */
+function buildAllTaskKeys(): string[] {
+  const keys: string[] = [];
+  for (const route of ALL_ROUTES) {
+    for (const asset of route.assets) {
+      for (const amountTier of route.amountTiers) {
+        keys.push(makeTaskKey(route.src, route.dst, asset, amountTier));
+      }
+    }
+  }
+  return keys;
+}
+
+/**
+ * Replace squidGapKeys with an accurate set derived from route_latest.
+ * Any task key where Squid has NO stored quote is a gap.
+ *
+ * Using DB (not sweep results) avoids false-positive gaps caused by Squid
+ * 429 cooldowns during the sweep — routes Squid was rate-limited for still
+ * get retried in T1/T2/T3 cycles, and once stored they'll disappear from
+ * gap keys next time this runs.
+ */
+async function refreshGapKeysFromDB(): Promise<void> {
+  const allKeys = buildAllTaskKeys();
+  const gaps = await getSquidGapKeys(allKeys);
+  squidGapKeys.clear();
+  for (const key of gaps) {
+    squidGapKeys.add(key);
+  }
+  logger.info(
+    { component: 'scheduler', gaps: squidGapKeys.size, total: allKeys.length },
+    `Squid gap keys refreshed from DB — ${squidGapKeys.size}/${allKeys.length} routes not covered by Squid`
+  );
 }
 
 // ─── Sweep ────────────────────────────────────────────────────────────────────
@@ -350,15 +387,22 @@ export function startScheduler(): void {
 
   // Skip the sweep if the DB already has quotes fresher than 30 min.
   // This prevents thundering-herd rate-limit blowout on container restarts / redeployments.
-  const sweepPromise = hasRecentQuotes(SKIP_SWEEP_IF_FRESH_MS).then((fresh) => {
+  const sweepPromise = hasRecentQuotes(SKIP_SWEEP_IF_FRESH_MS).then(async (fresh) => {
     if (fresh) {
       logger.info(
         { component: 'scheduler' },
-        'Recent quotes found in DB — skipping Squid sweep, going straight to periodic cycles'
+        'Recent quotes found in DB — skipping Squid sweep, populating gap keys from DB'
       );
+      // Even when sweep is skipped, we must populate squidGapKeys from DB so gap fill
+      // correctly identifies routes Squid doesn't cover (non-Squid aggregators fill those).
+      await refreshGapKeysFromDB();
       return;
     }
-    return runSquidSweep();
+    await runSquidSweep();
+    // After sweep: re-derive gap keys from DB. This is more accurate than sweep results
+    // because sweep-time 429 cooldowns produce false-positive gaps (routes Squid CAN cover
+    // but was rate-limited for). DB reflects what Squid actually stored.
+    await refreshGapKeysFromDB();
   });
 
   sweepPromise

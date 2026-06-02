@@ -507,6 +507,25 @@ export async function getGapCoverage(
   return coverage;
 }
 
+/**
+ * Returns task keys ("src:dst:asset:amountTier") for routes that Squid does NOT
+ * currently cover in route_latest. Used to initialise squidGapKeys so gap fill
+ * correctly identifies non-Squid routes even when the startup sweep was skipped.
+ */
+export async function getSquidGapKeys(allTaskKeys: string[]): Promise<string[]> {
+  if (allTaskKeys.length === 0) return [];
+
+  const result = await pool.query<{ key: string }>(
+    `SELECT DISTINCT
+       src_chain || ':' || dst_chain || ':' || asset || ':' || amount_tier::text AS key
+     FROM route_latest
+     WHERE source = 'squid'`
+  );
+
+  const squidCovered = new Set(result.rows.map((r) => r.key));
+  return allTaskKeys.filter((key) => !squidCovered.has(key));
+}
+
 /** Health check: quote count and oldest quote timestamp. */
 export async function getHealth(): Promise<{ quoteCount: number; oldestQuote: Date | null }> {
   const result = await query<{ count: string; min_ts: Date | null }>(

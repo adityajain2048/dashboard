@@ -224,37 +224,48 @@ function BridgeBoard({ rows }: { rows: BridgeCoverageItem[] }) {
   );
 }
 
-/* ─── aggregator performance (route wins) ─── */
+/* ─── aggregator performance (route wins, or success rate fallback) ─── */
 function AggregatorBoard({ rows }: { rows: AggregatorHealth[] }) {
-  const maxWins = Math.max(...rows.map((r) => r.wins ?? 0), 1);
+  // Backend may not have wins data (older deployment). Fall back to successRate.
+  const hasWinsData = rows.some((r) => (r.wins ?? 0) > 0);
+  const maxVal = hasWinsData
+    ? Math.max(...rows.map((r) => r.wins ?? 0), 1)
+    : 100; // successRate is already 0–100
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
       {rows.map((r, i) => {
         const color = aggMeta(r.id).color;
         const wins = r.wins ?? 0;
+        const barPct = hasWinsData ? (wins / maxVal) * 100 : r.successRate;
+        const primaryVal = hasWinsData ? wins.toLocaleString() : `${r.successRate}%`;
+        const secondaryVal = hasWinsData
+          ? `${r.winPct ?? 0}%`
+          : (r.avgResponseMs != null ? `${r.avgResponseMs}ms` : '—');
         return (
           <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ width: 14, fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 11, color: i === 0 ? 'var(--squid-lavender)' : 'var(--fg-3)', textAlign: 'right' }}>{i + 1}</span>
             <span style={{ width: 9, height: 9, borderRadius: 3, background: color, flexShrink: 0, boxShadow: `0 0 8px ${color}66` }} />
             <span style={{ width: 84, fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 12, color: 'var(--fg-1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{aggMeta(r.id).name}</span>
             <div style={{ flex: 1, height: 7, borderRadius: 4, background: 'var(--bg-3)', overflow: 'hidden' }}>
-              <div style={{ width: `${(wins / maxWins) * 100}%`, height: '100%', borderRadius: 4, background: i === 0 ? 'var(--squid-lavender)' : color, opacity: i === 0 ? 1 : 0.65 }} />
+              <div style={{ width: `${barPct}%`, height: '100%', borderRadius: 4, background: i === 0 ? 'var(--squid-lavender)' : color, opacity: i === 0 ? 1 : 0.65 }} />
             </div>
-            {/* primary: route wins */}
-            <span style={{ width: 36, textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 12, color: 'var(--fg-1)' }}>{wins.toLocaleString()}</span>
-            {/* secondary: win share */}
-            <span style={{ width: 38, textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)' }}>{r.winPct ?? 0}%</span>
+            <span style={{ width: 36, textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 12, color: 'var(--fg-1)' }}>{primaryVal}</span>
+            <span style={{ width: 38, textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)' }}>{secondaryVal}</span>
           </div>
         );
       })}
       <div style={{ marginTop: 10, padding: '8px 10px', background: 'var(--bg-2)', borderRadius: 'var(--r-xs)', border: '1px solid var(--line)' }}>
         <div className="t-mono-xs" style={{ color: 'var(--fg-3)', marginBottom: 6 }}>WHAT THIS MEASURES</div>
         <div className="t-caption" style={{ color: 'var(--fg-2)', lineHeight: 1.5 }}>
-          For each live route, the aggregator that returned the single highest output quote gets credited with a win — regardless of which bridge it used.
+          {hasWinsData
+            ? 'For each live route, the aggregator that returned the single highest output quote gets credited with a win — regardless of which bridge it used.'
+            : 'Success rate = successful quotes ÷ actionable requests over the last 24 h. Latency = avg response time for successful calls.'}
         </div>
       </div>
       <div className="t-mono-xs" style={{ color: 'var(--fg-4)', marginTop: 2, display: 'flex', justifyContent: 'space-between' }}>
-        <span>aggregator</span><span>routes won · share</span>
+        <span>aggregator</span>
+        <span>{hasWinsData ? 'routes won · share' : 'success rate · latency'}</span>
       </div>
     </div>
   );
