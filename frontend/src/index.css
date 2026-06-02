@@ -1,33 +1,17 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
-
-:root {
-  --bg-primary: #0a0a14;
-  --bg-secondary: #12121f;
-  --bg-tertiary: #0f0f1c;
-  --bg-card: #1a1a2e;
-  --border-primary: #1e1e3a;
-  --border-hover: #2a2a4a;
-  --text-primary: #e0e0f0;
-  --text-secondary: #888;
-  --text-muted: #555;
-  --text-dim: #444;
-  --accent-green: #6CF9D8;
-  --accent-blue: #4F7FFF;
-  --accent-yellow: #F59E0B;
-  --accent-red: #FF6B6B;
-  --accent-purple: #836EF9;
-}
+@import "./squid/tokens.css";
 
 * {
   box-sizing: border-box;
 }
 
-body {
+html, body {
   margin: 0;
   min-height: 100vh;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  background: var(--bg-0);
+  color: var(--fg-1);
+  font-family: var(--font-ui);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -36,22 +20,24 @@ body {
   min-height: 100vh;
 }
 
+button { font-family: inherit; }
+
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-track {
-  background: var(--bg-primary);
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--border-hover);
-  border-radius: 3px;
+  background: var(--line-2);
+  border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-muted);
+  background: var(--fg-4);
 }
 
 ::selection {
-  background: rgba(108, 249, 216, 0.2);
-  color: var(--text-primary);
+  background: rgba(230, 250, 54, 0.25);
+  color: var(--fg-1);
 }

@@ -161,9 +161,9 @@ export const TIER2_ROUTES = ALL_ROUTES.filter(r => r.tier === 2);
 export const TIER3_ROUTES = ALL_ROUTES.filter(r => r.tier === 3);
 
 export const REFRESH_INTERVALS: Record<RefreshTier, number> = {
-  1: 60_000,    // 60 seconds
-  2: 120_000,   // 2 minutes
-  3: 300_000,   // 5 minutes
+  1: 5 * 60_000,    // 5 minutes
+  2: 12 * 60_000,   // 12 minutes
+  3: 40 * 60_000,   // 40 minutes
 };
 
 // ─── Route key helpers ───

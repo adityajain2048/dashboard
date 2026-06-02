@@ -31,10 +31,10 @@ src/
 5. **Every function is typed.** No `any`. Use discriminated unions for aggregator responses.
 
 ## Key Constants
-- Refresh: Tier 1 = 60s, Tier 2 = 120s, Tier 3 = 300s
+- Refresh: Tier 1 = 5min, Tier 2 = 12min, Tier 3 = 40min
 - Amount tiers: 50, 1000, 50000 (USD). **Implementation note:** T1 and T3 use a reduced set (T1: $1K only; T3: $1K only, USDC+ETH) to limit API volume; T2 uses all three amounts and all three assets.
 - Assets: ETH, USDC, USDT
-- Stale thresholds: T1 > 3min, T2 > 6min, T3 > 15min
+- Stale threshold: > 47min for all tiers (one full refresh cycle); before that, routes stay active with live data
 
 ## Build & Run
 ```bash

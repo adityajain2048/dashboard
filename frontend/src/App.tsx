@@ -1,21 +1,28 @@
+/* ════════════════════════════════════════════════════════════════════════
+   APP SHELL — Squid Bridge Intelligence. Sidebar nav + top control bar +
+   view router. Asset / tier / live-status state is shared across views and
+   driven entirely by the backend (/api/health for liveness).
+   ════════════════════════════════════════════════════════════════════════ */
 import { useState, useEffect, useCallback } from 'react';
 import { fetchHealth } from './api/client';
-import { AssetIcon } from './components/AssetIcon';
-import { RouteExplorer } from './views/RouteExplorer';
-import { Heatmap } from './views/Heatmap';
 import { HEATMAP_ORDER } from './config/chains';
+import { SquidMark, SquidWordmark } from './squid/brand';
+import { Insights } from './views/squid/Insights';
+import { RouteExplorer } from './views/squid/RouteExplorer';
+import { Leaderboard } from './views/squid/Leaderboard';
 
-const ASSETS = ['ETH', 'USDC', 'USDT'] as const;
-const TIERS: Array<{ key: number; label: string }> = [
-  { key: 50, label: '$50' },
-  { key: 1000, label: '$1K' },
-  { key: 50000, label: '$50K' },
+const ASSETS = ['USDC', 'USDT', 'ETH'] as const;
+const TIERS: Array<{ k: number; l: string }> = [
+  { k: 50, l: '$50' },
+  { k: 1000, l: '$1K' },
+  { k: 50000, l: '$50K' },
 ];
 
-type Tab = 'explorer' | 'matrix';
-const TABS: Array<{ key: Tab; label: string }> = [
-  { key: 'explorer', label: 'Explorer' },
-  { key: 'matrix', label: 'Matrix' },
+type View = 'insights' | 'explorer' | 'bridges';
+const NAV: Array<{ k: View; l: string; icon: string }> = [
+  { k: 'insights', l: 'Insights', icon: '◇' },
+  { k: 'explorer', l: 'Route Explorer', icon: '◈' },
+  { k: 'bridges', l: 'Bridge Leaderboard', icon: '▤' },
 ];
 
 interface HealthData {
@@ -25,12 +32,14 @@ interface HealthData {
 }
 
 function App() {
+  const [view, setView] = useState<View>('insights');
   const [asset, setAsset] = useState<string>('USDC');
   const [tier, setTier] = useState<number>(1000);
+  const [route, setRoute] = useState<{ src: string; dst: string } | null>(null);
+
   const [health, setHealth] = useState<HealthData | null>(null);
-  const [lastUpdate, setLastUpdate] = useState<number>(0);
-  const [selectedRoute, setSelectedRoute] = useState<{ src: string; dst: string } | null>(null);
-  const [activeTab, setActiveTab] = useState<Tab>('explorer');
+  const [lastUpdate, setLastUpdate] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
     const poll = () => {
@@ -43,133 +52,106 @@ function App() {
     return () => clearInterval(id);
   }, []);
 
-  const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
     if (!lastUpdate) return;
     const id = setInterval(() => setElapsed(Math.floor((Date.now() - lastUpdate) / 1000)), 1000);
     return () => clearInterval(id);
   }, [lastUpdate]);
 
-  const handleCellClick = useCallback((src: string, dst: string) => {
-    setSelectedRoute({ src, dst });
-    setActiveTab('explorer');
+  const openRoute = useCallback((src: string, dst: string) => {
+    setRoute({ src, dst });
+    setView('explorer');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
-  const statusColor = health?.status === 'ok' ? '#6CF9D8' : health?.status === 'degraded' ? '#F59E0B' : '#FF6B6B';
+  const live = health?.status === 'ok';
+  const statusColor = live ? 'var(--good)' : health?.status === 'degraded' ? 'var(--warn)' : 'var(--bad)';
+  const routeCount = HEATMAP_ORDER.length * (HEATMAP_ORDER.length - 1);
 
   return (
-    <div style={{ background: '#0a0a14', minHeight: '100vh' }}>
-
-      {/* ═══ TOP NAV BAR ═══ */}
-      <div style={{ background: 'linear-gradient(180deg, #12121f 0%, #0d0d1a 100%)', borderBottom: '1px solid #1e1e3a', padding: '0 24px', position: 'sticky', top: 0, zIndex: 50 }}>
-        <div className="flex items-center justify-between" style={{ maxWidth: 1440, margin: '0 auto', height: 56 }}>
-
-          {/* Logo */}
-          <div className="flex items-center gap-3">
-            <div style={{ width: 28, height: 28, borderRadius: 6, background: 'linear-gradient(135deg, #6CF9D8, #4F7FFF)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <span style={{ fontSize: 14, fontWeight: 900, color: '#0a0a14' }}>B</span>
-            </div>
-            <span style={{ fontSize: 15, fontWeight: 700, color: '#e0e0f0', letterSpacing: '-0.5px' }}>Bridge Rate Explorer</span>
-            <span style={{ fontSize: 9, color: '#6CF9D8', background: '#6CF9D812', padding: '2px 6px', borderRadius: 4, fontWeight: 600 }}>BETA</span>
-            <div style={{ width: 8, height: 8, borderRadius: '50%', background: statusColor, boxShadow: `0 0 6px ${statusColor}40` }} title={`Status: ${health?.status ?? 'unknown'}`} />
-          </div>
-
-          {/* Center: Asset + Tier pills */}
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-1" style={{ background: '#1a1a2e', borderRadius: 8, padding: 3 }}>
-              {ASSETS.map(a => (
-                <button
-                  key={a}
-                  type="button"
-                  onClick={() => setAsset(a)}
-                  className="flex items-center gap-1.5"
-                  style={{
-                    padding: '5px 14px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer', border: 'none', transition: 'all 0.2s',
-                    background: asset === a ? '#6CF9D820' : 'transparent',
-                    color: asset === a ? '#6CF9D8' : '#666',
-                    boxShadow: asset === a ? 'inset 0 0 0 1px #6CF9D840' : 'none',
-                    fontFamily: 'inherit',
-                  }}
-                  title={a === 'ETH' ? 'Chain native (ETH, BNB, SOL, etc.)' : undefined}
-                >
-                  <AssetIcon asset={a} size={14} />
-                  {a === 'ETH' ? 'Native' : a}
-                </button>
-              ))}
-            </div>
-
-            <div className="flex items-center gap-1" style={{ background: '#1a1a2e', borderRadius: 8, padding: 3 }}>
-              {TIERS.map(t => (
-                <button
-                  key={t.key}
-                  type="button"
-                  onClick={() => setTier(t.key)}
-                  style={{
-                    padding: '5px 14px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer', border: 'none', transition: 'all 0.2s',
-                    background: tier === t.key ? '#4F7FFF20' : 'transparent',
-                    color: tier === t.key ? '#4F7FFF' : '#666',
-                    boxShadow: tier === t.key ? 'inset 0 0 0 1px #4F7FFF40' : 'none',
-                    fontFamily: 'inherit',
-                  }}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Right: Stats */}
-          <div className="flex items-center gap-5">
-            <Stat label="Chains" value={String(HEATMAP_ORDER.length)} />
-            <Stat label="Routes" value={String(HEATMAP_ORDER.length * (HEATMAP_ORDER.length - 1))} />
-            <Stat label="Bridges" value="17" />
-            <Stat label="Updated" value={elapsed > 0 ? `${elapsed}s ago` : '...'} valueColor="#6CF9D8" />
+    <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg-0)' }}>
+      {/* ─── SIDEBAR ─── */}
+      <aside style={{ width: 230, flexShrink: 0, borderRight: '1px solid var(--line)', background: 'var(--bg-1)', display: 'flex', flexDirection: 'column', position: 'sticky', top: 0, height: '100vh' }}>
+        <div style={{ padding: '20px 18px 16px', display: 'flex', alignItems: 'center', gap: 11, borderBottom: '1px solid var(--line)' }}>
+          <SquidMark size={34} variant="lime" />
+          <div>
+            <SquidWordmark height={22} />
+            <div className="t-mono-xs" style={{ color: 'var(--squid-lavender)', marginTop: 4, fontSize: 9 }}>BRIDGE INTELLIGENCE</div>
           </div>
         </div>
+
+        <nav style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {NAV.map((n) => {
+            const on = view === n.k;
+            return (
+              <button key={n.k} onClick={() => setView(n.k)} style={{
+                display: 'flex', alignItems: 'center', gap: 11, padding: '10px 12px', borderRadius: 'var(--r-sm)',
+                border: 'none', cursor: 'pointer', textAlign: 'left', width: '100%',
+                background: on ? 'rgba(230,250,54,0.10)' : 'transparent',
+                color: on ? 'var(--squid-lime)' : 'var(--fg-2)',
+                fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 13,
+                boxShadow: on ? 'inset 0 0 0 1px rgba(230,250,54,0.25)' : 'none', transition: 'all .12s',
+              }}>
+                <span style={{ fontSize: 14, opacity: on ? 1 : 0.6 }}>{n.icon}</span>{n.l}
+              </button>
+            );
+          })}
+        </nav>
+
+        <div style={{ marginTop: 'auto', padding: 16, borderTop: '1px solid var(--line)' }}>
+          <div style={{ background: 'var(--bg-2)', border: '1px solid var(--line)', borderRadius: 'var(--r-sm)', padding: '11px 13px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 7 }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: statusColor, boxShadow: `0 0 8px ${statusColor}` }} />
+              <span className="t-mono-xs" style={{ color: statusColor }}>{live ? 'all systems live' : (health?.status ?? 'connecting…')}</span>
+            </div>
+            <div className="t-caption" style={{ fontSize: 11, lineHeight: 1.5 }}>
+              4 aggregators · 17 bridges · {HEATMAP_ORDER.length} chains
+              {health ? ` · ${health.db.quoteCount.toLocaleString()} live quotes` : ''}.
+            </div>
+          </div>
+          <div className="t-mono-xs" style={{ color: 'var(--fg-4)', marginTop: 11, textAlign: 'center', fontSize: 9 }}>powered by Squid Router</div>
+        </div>
+      </aside>
+
+      {/* ─── MAIN ─── */}
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        <header style={{ position: 'sticky', top: 0, zIndex: 40, background: 'rgba(11,11,15,0.82)', backdropFilter: 'blur(14px)', borderBottom: '1px solid var(--line)', padding: '0 24px', height: 60, display: 'flex', alignItems: 'center', gap: 18 }}>
+          <div className="t-h3" style={{ fontSize: 15 }}>{NAV.find((n) => n.k === view)!.l}</div>
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 14 }}>
+            <Segmented options={ASSETS.map((a) => ({ k: a, l: a === 'ETH' ? 'Native' : a }))} value={asset} onChange={(v) => setAsset(String(v))} accent="var(--squid-lavender)" />
+            <Segmented options={TIERS.map((t) => ({ k: t.k, l: t.l }))} value={tier} onChange={(v) => setTier(Number(v))} accent="var(--squid-lime)" />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, paddingLeft: 6 }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: statusColor, boxShadow: `0 0 8px ${statusColor}` }} title={`${routeCount} routes`} />
+              <span className="t-mono-xs" style={{ color: 'var(--fg-3)' }}>{lastUpdate ? `${elapsed}s ago` : '…'}</span>
+            </div>
+          </div>
+        </header>
+
+        <main style={{ padding: '22px 24px 60px', maxWidth: 1480, width: '100%', margin: '0 auto' }}>
+          {view === 'insights' && <Insights asset={asset} tier={tier} onOpenRoute={openRoute} />}
+          {view === 'explorer' && <RouteExplorer asset={asset} tier={tier} route={route} />}
+          {view === 'bridges' && <Leaderboard asset={asset} tier={tier} />}
+        </main>
       </div>
-
-      {/* ═══ TAB BAR ═══ */}
-      <div style={{ background: '#0d0d1a', borderBottom: '1px solid #1e1e3a', padding: '0 24px' }}>
-        <div className="flex items-center gap-2" style={{ maxWidth: 1440, margin: '0 auto', height: 40 }}>
-          {TABS.map(t => (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setActiveTab(t.key)}
-              style={{
-                padding: '6px 16px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer', border: 'none', transition: 'all 0.2s',
-                background: activeTab === t.key ? '#6CF9D815' : 'transparent',
-                color: activeTab === t.key ? '#6CF9D8' : '#666',
-                boxShadow: activeTab === t.key ? 'inset 0 0 0 1px #6CF9D830' : 'none',
-                fontFamily: 'inherit',
-              }}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* ═══ MAIN CONTENT ═══ */}
-      {activeTab === 'matrix' ? (
-        <div style={{ padding: '12px 8px' }}>
-          <Heatmap asset={asset} tier={tier} onCellClick={handleCellClick} />
-        </div>
-      ) : (
-        <div style={{ maxWidth: 1440, margin: '0 auto', padding: '20px 24px' }}>
-          <RouteExplorer asset={asset} tier={tier} selectedRoute={selectedRoute} />
-        </div>
-      )}
     </div>
   );
 }
 
-function Stat({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
+function Segmented<T extends string | number>({ options, value, onChange, accent }: {
+  options: Array<{ k: T; l: string }>; value: T; onChange: (v: T) => void; accent: string;
+}) {
   return (
-    <div style={{ textAlign: 'right' }}>
-      <div style={{ fontSize: 8, color: '#555', textTransform: 'uppercase', letterSpacing: 1 }}>{label}</div>
-      <div style={{ fontSize: 13, color: valueColor ?? '#e0e0f0', fontWeight: 600 }}>{value}</div>
+    <div style={{ display: 'flex', gap: 3, background: 'var(--bg-2)', borderRadius: 'var(--r-sm)', padding: 3, border: '1px solid var(--line)' }}>
+      {options.map((o) => {
+        const on = value === o.k;
+        return (
+          <button key={String(o.k)} onClick={() => onChange(o.k)} style={{
+            padding: '5px 13px', borderRadius: 6, border: 'none', cursor: 'pointer',
+            fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 11,
+            background: on ? accent : 'transparent', color: on ? 'var(--on-lime)' : 'var(--fg-3)', transition: 'all .12s',
+          }}>{o.l}</button>
+        );
+      })}
     </div>
   );
 }

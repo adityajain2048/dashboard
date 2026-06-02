@@ -1,0 +1,101 @@
+/* ============================================================================
+   SQUID BRIDGE INTELLIGENCE — Colors & Type
+   Brand: Squid Router (squidrouter.com). Lime + Lavender + Ink.
+   Ported verbatim from the design handoff (project/colors_and_type.css).
+   ========================================================================== */
+
+/* Brand webfonts are imported at the top of src/index.css so the @import
+   precedes Tailwind's rules (CSS requires @import before other statements). */
+
+:root {
+  /* ─── BRAND CORE ──────────────────────────────────────────────────────── */
+  --squid-lime:        #E6FA36;
+  --squid-lime-bright: #ECFF52;
+  --squid-lime-deep:   #C4D81F;
+  --squid-lavender:    #BC8EE4;
+  --squid-lavender-br: #CBA6EE;
+  --squid-lavender-dp: #9B6FC9;
+  --squid-ink:         #0B0B0F;
+
+  /* ─── SURFACES (dark "ink" theme) ─────────────────────────────────────── */
+  --bg-0:   #0B0B0F;
+  --bg-1:   #121218;
+  --bg-2:   #181820;
+  --bg-3:   #20202B;
+  --bg-4:   #2A2A38;
+  --line:   #26262F;
+  --line-2: #34343F;
+
+  /* ─── FOREGROUND / TEXT ───────────────────────────────────────────────── */
+  --fg-1: #F4F4F0;
+  --fg-2: #A8A8B4;
+  --fg-3: #6E6E7C;
+  --fg-4: #45454F;
+  --on-lime: #0B0B0F;
+
+  /* ─── SEMANTIC / DATA SIGNAL ──────────────────────────────────────────── */
+  --win:    #E6FA36;
+  --good:   #7BE0A6;
+  --warn:   #F5C451;
+  --bad:    #FF6B81;
+  --info:   #BC8EE4;
+  --stale:  #6E6E7C;
+
+  /* Heatmap fee ramp (cheap → expensive): traffic-light green → orange → red */
+  --heat-0: #34D17A;  /* < 0.10% — green, best / cheapest */
+  --heat-1: #9BD63F;  /* < 0.25% — yellow-green */
+  --heat-2: #E8D43A;  /* < 0.50% — yellow */
+  --heat-3: #F2A93E;  /* < 1.00% — orange */
+  --heat-4: #EC7A3C;  /* < 2.00% — dark orange */
+  --heat-5: #E04444;  /* ≥ 2.00% — red, worst */
+
+  /* ─── RADII ───────────────────────────────────────────────────────────── */
+  --r-xs: 6px;
+  --r-sm: 9px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 22px;
+  --r-pill: 999px;
+
+  /* ─── SHADOWS / ELEVATION ─────────────────────────────────────────────── */
+  --sh-1: 0 1px 2px rgba(0,0,0,0.4);
+  --sh-2: 0 4px 16px rgba(0,0,0,0.45);
+  --sh-3: 0 12px 40px rgba(0,0,0,0.55);
+  --glow-lime: 0 0 0 1px rgba(230,250,54,0.35), 0 6px 24px rgba(230,250,54,0.18);
+  --glow-lav:  0 0 0 1px rgba(188,142,228,0.35), 0 6px 24px rgba(188,142,228,0.16);
+
+  /* ─── TYPE FAMILIES ───────────────────────────────────────────────────── */
+  --font-display: 'Space Grotesk', 'DM Sans', system-ui, sans-serif;
+  --font-ui:      'DM Sans', system-ui, -apple-system, sans-serif;
+  --font-mono:    'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+
+  /* ─── SPACING SCALE (4px base) ────────────────────────────────────────── */
+  --s-1: 4px;  --s-2: 8px;  --s-3: 12px; --s-4: 16px;
+  --s-5: 20px; --s-6: 24px; --s-8: 32px; --s-10: 40px; --s-12: 48px; --s-16: 64px;
+}
+
+/* ============================================================================
+   SEMANTIC TYPE RAMP
+   ========================================================================== */
+.t-display { font-family: var(--font-display); font-weight: 700; font-size: 56px; line-height: 0.98; letter-spacing: -0.03em; color: var(--fg-1); }
+.t-h1 { font-family: var(--font-display); font-weight: 700; font-size: 32px; line-height: 1.05; letter-spacing: -0.02em; color: var(--fg-1); }
+.t-h2 { font-family: var(--font-display); font-weight: 600; font-size: 22px; line-height: 1.12; letter-spacing: -0.015em; color: var(--fg-1); }
+.t-h3 { font-family: var(--font-display); font-weight: 600; font-size: 16px; line-height: 1.2; letter-spacing: -0.01em; color: var(--fg-1); }
+.t-body { font-family: var(--font-ui); font-weight: 400; font-size: 14px; line-height: 1.5; color: var(--fg-2); }
+.t-label { font-family: var(--font-ui); font-weight: 600; font-size: 11px; line-height: 1; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-3); }
+.t-caption { font-family: var(--font-ui); font-weight: 400; font-size: 12px; line-height: 1.4; color: var(--fg-3); }
+.t-data { font-family: var(--font-mono); font-weight: 500; font-size: 13px; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; color: var(--fg-1); }
+.t-data-lg { font-family: var(--font-mono); font-weight: 600; font-size: 26px; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; color: var(--fg-1); }
+.t-mono-xs { font-family: var(--font-mono); font-weight: 500; font-size: 10px; letter-spacing: 0.02em; text-transform: uppercase; color: var(--fg-3); }
+
+/* ============================================================================
+   SHARED COMPONENT PRIMITIVES (ported from the design's index.html <style>)
+   ========================================================================== */
+.sq-card { background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--r-md); }
+.sq-card-hover { transition: border-color .14s, transform .14s, box-shadow .14s; }
+.sq-card-hover:hover { border-color: var(--line-2); transform: translateY(-1px); box-shadow: var(--sh-2); }
+
+.sq-row { transition: background .12s; }
+.sq-row:hover { background: var(--bg-2) !important; }
+
+@keyframes sqPop { from { opacity: 0; transform: translateY(4px) scale(0.99); } to { opacity: 1; transform: none; } }

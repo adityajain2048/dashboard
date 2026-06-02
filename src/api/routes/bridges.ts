@@ -96,16 +96,21 @@ export default async function bridgesRoutes(
         `SELECT best_bridge AS bridge, COUNT(*) AS wins
          FROM route_status
          WHERE state IN ('active', 'single-bridge') AND best_bridge IS NOT NULL
+           AND last_seen > NOW() - INTERVAL '47 minutes'
          GROUP BY best_bridge`
       ),
       query<FeeRow>(
         `SELECT best_bridge AS bridge, AVG(best_fee_bps) AS avg_fee_bps
          FROM route_status
-         WHERE state IN ('active', 'single-bridge') AND best_bridge IS NOT NULL AND best_fee_bps IS NOT NULL
+         WHERE state IN ('active', 'single-bridge') AND best_bridge IS NOT NULL
+           AND best_fee_bps IS NOT NULL AND best_fee_bps >= 0
+           AND last_seen > NOW() - INTERVAL '47 minutes'
          GROUP BY best_bridge`
       ),
       query<TotalRow>(
-        `SELECT COUNT(*) AS total FROM route_status WHERE state IN ('active', 'single-bridge')`
+        `SELECT COUNT(*) AS total FROM route_status
+         WHERE state IN ('active', 'single-bridge')
+           AND last_seen > NOW() - INTERVAL '47 minutes'`
       ),
     ]);
 

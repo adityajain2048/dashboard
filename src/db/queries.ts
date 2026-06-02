@@ -100,11 +100,16 @@ export async function upsertRouteLatest(quotes: NormalizedQuote[]): Promise<void
   }
 }
 
-/** Stale thresholds by refresh tier (CLAUDE.md): T1 > 3min, T2 > 6min, T3 > 15min */
+/**
+ * Stale threshold: a route is only marked stale after roughly one full refresh
+ * cycle (~47 min) elapses without a new quote. Applied uniformly across tiers so
+ * fast-tier routes don't flap to stale between cycles — before 47 min a route
+ * keeps its `active`/`single-bridge` state with live data.
+ */
 export const STALE_THRESHOLD_MS: Record<1 | 2 | 3, number> = {
-  1: 3 * 60 * 1000,   // 3 min
-  2: 6 * 60 * 1000,   // 6 min
-  3: 15 * 60 * 1000,  // 15 min
+  1: 47 * 60 * 1000,  // 47 min (one full cycle)
+  2: 47 * 60 * 1000,  // 47 min (one full cycle)
+  3: 47 * 60 * 1000,  // 47 min (one full cycle)
 };
 
 /** A single row from route_latest as consumed by computeRouteStatus. */
@@ -184,10 +189,22 @@ export function computeRouteStatus(
     state = 'active';
   }
 
-  // ── Best / worst selection from ALL valid rows ─────────────────────────────
+  // ── Best / worst selection — only from quotes fresh relative to lastSeen ────
+  // If one bridge was quoted 90 min ago and others were just quoted, comparing
+  // them produces a fictitious spread. Restrict ranking to rows whose individual
+  // timestamp falls within one staleness window of the most-recent quote so
+  // stale outliers cannot inflate the reported "best" or "worst" bridge.
+  // If no rows pass the freshness filter (e.g. all data is uniformly old but
+  // the route hasn't flipped to stale yet) fall back to all validRows so the
+  // matrix never goes blank.
+  const freshValidRows = lastSeen
+    ? validRows.filter((r) => (lastSeen.getTime() - r.ts.getTime()) <= thresholdMs)
+    : validRows;
+  const rankingRows = freshValidRows.length > 0 ? freshValidRows : validRows;
+
   // RouteLatestInput uses snake_case (output_usd, total_fee_bps) but the
   // canonical helpers expect camelCase RankableQuote. Map once here.
-  const rankable = validRows.map((r) => ({
+  const rankable = rankingRows.map((r) => ({
     bridge: r.bridge,
     source: r.source,
     outputUsd: r.output_usd,                       // output_usd → outputUsd

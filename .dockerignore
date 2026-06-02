@@ -1,0 +1,31 @@
+# Dependencies — reinstalled via `npm ci` inside the image
+node_modules
+frontend/node_modules
+
+# Build outputs — regenerated inside the image
+dist
+frontend/dist
+
+# Version control / CI
+.git
+.github
+.gitignore
+
+# Local-only & secrets — the app reads config from Azure env vars, never a baked .env
+.env
+.env.local
+.env.development
+.env.test
+.vercel
+frontend/.vercel
+
+# Legacy/removed dashboard — not part of the backend image
+enso-dashboard
+
+# Misc
+*.log
+npm-debug.log*
+.DS_Store
+coverage
+.vscode
+.idea

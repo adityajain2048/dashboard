@@ -89,6 +89,23 @@ export async function fetchBridgeHealth(): Promise<{
   return res.json();
 }
 
+export interface Opportunity {
+  src: string; dst: string; asset: string; amountTier: number;
+  spreadBps: number; bestBridge: string | null; worstBridge: string | null;
+  bestOutputUsd: string | null; worstOutputUsd: string | null;
+  quoteCount: number; lastSeen: string | null;
+}
+
+export async function fetchOpportunities(
+  asset: string, tier: number, limit = 12, minSpreadBps = 0
+): Promise<{ opportunities: Opportunity[]; total: number }> {
+  const res = await fetch(
+    `${BASE}/api/opportunities?asset=${asset}&tier=${tier}&limit=${limit}&minSpreadBps=${minSpreadBps}`
+  );
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
 export interface HistoryDataPoint {
   ts: string; bridge: string; avgOutputUsd: number; avgFeeBps: number; quoteCount: number;
 }

@@ -19,9 +19,9 @@ function row(overrides: Partial<RouteLatestInput> & { ageMs?: number } = {}): Ro
 }
 
 /** Returns a `now` Date aligned so thresholdMs expires exactly after `ageMs`. */
-const T1_THRESHOLD = STALE_THRESHOLD_MS[1]; // 3 min
-const T2_THRESHOLD = STALE_THRESHOLD_MS[2]; // 6 min
-const T3_THRESHOLD = STALE_THRESHOLD_MS[3]; // 15 min
+const T1_THRESHOLD = STALE_THRESHOLD_MS[1]; // 47 min (one full cycle)
+const T2_THRESHOLD = STALE_THRESHOLD_MS[2]; // 47 min (one full cycle)
+const T3_THRESHOLD = STALE_THRESHOLD_MS[3]; // 47 min (one full cycle)
 
 // ─── State classification ─────────────────────────────────────────────────────
 
@@ -48,7 +48,7 @@ describe('computeRouteStatus — state', () => {
     expect(result.state).toBe('single-bridge');
   });
 
-  it('stale when most recent quote is older than threshold (T1 = 3 min)', () => {
+  it('stale when most recent quote is older than threshold (T1 = 47 min)', () => {
     const rows = [
       row({ bridge: 'across',   ageMs: T1_THRESHOLD + 1000 }),
       row({ bridge: 'stargate', ageMs: T1_THRESHOLD + 2000 }),
@@ -57,13 +57,13 @@ describe('computeRouteStatus — state', () => {
     expect(result.state).toBe('stale');
   });
 
-  it('stale when most recent quote is older than threshold (T2 = 6 min)', () => {
+  it('stale when most recent quote is older than threshold (T2 = 47 min)', () => {
     const rows = [row({ bridge: 'across', ageMs: T2_THRESHOLD + 1000 })];
     const result = computeRouteStatus(rows, 2);
     expect(result.state).toBe('stale');
   });
 
-  it('stale when most recent quote is older than threshold (T3 = 15 min)', () => {
+  it('stale when most recent quote is older than threshold (T3 = 47 min)', () => {
     const rows = [row({ bridge: 'across', ageMs: T3_THRESHOLD + 1000 })];
     const result = computeRouteStatus(rows, 3);
     expect(result.state).toBe('stale');
@@ -87,7 +87,7 @@ describe('computeRouteStatus — state', () => {
       row({ bridge: 'stargate', ageMs: T1_THRESHOLD * 10 }), // very old
     ];
     const result = computeRouteStatus(rows, 1);
-    // lastSeen is 1 min ago → within 3 min threshold → active
+    // lastSeen is 1 min ago → within 47 min threshold → active
     expect(result.state).toBe('active');
   });
 });
@@ -162,18 +162,18 @@ describe('computeRouteStatus — bestFeeBps', () => {
     expect(result.bestFeeBps).toBe(15);
   });
 
-  it('picks the highest output across ALL valid rows (including route_latest entries older than threshold)', () => {
-    // Design decision: route_latest holds the latest quote per (bridge, source).
-    // We rank canonically across ALL of them so /api/quotes and the matrix agree.
-    // Freshness is only used for STATE classification (active/stale/dead).
+  it('picks old-bridge when its age relative to lastSeen is within the freshness window', () => {
+    // old-bridge is T1_THRESHOLD+5s old; new-bridge is 60s old (= lastSeen).
+    // Age of old-bridge relative to lastSeen ≈ 46 min < 47 min threshold → included.
+    // If old-bridge were T1_THRESHOLD+60_001ms older than lastSeen it would be excluded.
     const rows = [
       row({ bridge: 'old-bridge', output_usd: '995', total_fee_bps: 5,  ageMs: T1_THRESHOLD + 5000 }),
       row({ bridge: 'new-bridge', output_usd: '980', total_fee_bps: 200, ageMs: 60_000 }),
     ];
     const result = computeRouteStatus(rows, 1);
     expect(result.state).toBe('active'); // lastSeen = 1min ago (new-bridge) → fresh
-    expect(result.bestBridge).toBe('old-bridge'); // highest output wins across ALL rows
-    expect(result.bestFeeBps).toBe(5);            // from old-bridge; state=active → not null
+    expect(result.bestBridge).toBe('old-bridge'); // within freshness window of lastSeen → ranked
+    expect(result.bestFeeBps).toBe(5);
   });
 
   it('drops quotes with total_fee_bps > 1000 (garbage quotes)', () => {
@@ -226,16 +226,19 @@ describe('computeRouteStatus — spreadBps', () => {
     expect(result.spreadBps).toBeNull();
   });
 
-  it('includes spread-window rows (within 3× threshold) for worst calculation', () => {
-    // One fresh row (< 1× threshold), one slightly stale row (< 3× threshold).
-    // Spread should factor in the spread-window row for worst-case.
+  it('excludes stale rows beyond 1× threshold from lastSeen — spread uses only fresh bridges', () => {
+    // across is 60s old (= lastSeen). stargate is 94 min old — 93+ min older than lastSeen,
+    // which exceeds the 47 min freshness window. Only across passes the filter → spread = 0.
+    // This prevents a 90-min-old NEAR quote being compared against fresh Relay quotes to
+    // produce a fictitious spread (the exact bug that motivated this change).
     const rows = [
-      row({ bridge: 'across',   output_usd: '990', total_fee_bps: 100, ageMs: 60_000 }),             // fresh
-      row({ bridge: 'stargate', output_usd: '970', total_fee_bps: 300, ageMs: T1_THRESHOLD * 2 }),   // in spread window
+      row({ bridge: 'across',   output_usd: '990', total_fee_bps: 100, ageMs: 60_000 }),
+      row({ bridge: 'stargate', output_usd: '970', total_fee_bps: 300, ageMs: T1_THRESHOLD * 2 }),
     ];
     const result = computeRouteStatus(rows, 1);
-    expect(result.state).toBe('active'); // lastSeen fresh
-    expect(result.spreadBps).toBeGreaterThan(0); // spread window includes stargate
+    expect(result.state).toBe('active');      // lastSeen = 60s ago → fresh
+    expect(result.bestBridge).toBe('across'); // only fresh bridge
+    expect(result.spreadBps).toBe(0);         // single fresh bridge → no spread
   });
 });
 
