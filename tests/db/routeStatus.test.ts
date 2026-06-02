@@ -280,10 +280,10 @@ describe('computeRouteStatus — worstBridge', () => {
 
   it('Regression E: polygon→bsc USDC $50K — worstBridge is axelar', () => {
     const rows = [
-      row({ bridge: 'cbridge',  output_usd: '49997.98504000', total_fee_bps: 0, ageMs: 60_000 }),
-      row({ bridge: 'across',   output_usd: '49987.90762800', total_fee_bps: 2, ageMs: 60_000 }),
-      row({ bridge: 'debridge', output_usd: '49960.00800046', total_fee_bps: 8, ageMs: 60_000 }),
-      row({ bridge: 'axelar',   output_usd: '49954.41385768', total_fee_bps: 9, ageMs: 60_000 }),
+      row({ bridge: 'cbridge',  input_usd: '50000', output_usd: '49997.98504000', total_fee_bps: 0, ageMs: 60_000 }),
+      row({ bridge: 'across',   input_usd: '50000', output_usd: '49987.90762800', total_fee_bps: 2, ageMs: 60_000 }),
+      row({ bridge: 'debridge', input_usd: '50000', output_usd: '49960.00800046', total_fee_bps: 8, ageMs: 60_000 }),
+      row({ bridge: 'axelar',   input_usd: '50000', output_usd: '49954.41385768', total_fee_bps: 9, ageMs: 60_000 }),
     ];
     const result = computeRouteStatus(rows, 2);
     expect(result.bestBridge).toBe('cbridge');

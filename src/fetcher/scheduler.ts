@@ -5,6 +5,7 @@ import { generateBatchId, chunk } from '../lib/utils.js';
 import { logger } from '../lib/logger.js';
 import { refreshNativePrices } from '../lib/prices.js';
 import { getGapCoverage, hasRecentQuotes, getSquidGapKeys } from '../db/queries.js';
+import { loadSkipMap } from '../lib/aggregator-skip.js';
 
 // ─── Concurrency constants ────────────────────────────────────────────────────
 
@@ -385,9 +386,19 @@ const SKIP_SWEEP_IF_FRESH_MS = 30 * 60_000;
 export function startScheduler(): void {
   logger.info({ component: 'scheduler' }, 'Scheduler starting — Squid sweep first, then periodic refresh');
 
+  // Refresh skip map every 30 minutes to pick up new skip entries from completed cycles.
+  setInterval(() => {
+    loadSkipMap().catch((e) => logger.warn(e, 'Skip map refresh failed'));
+  }, 30 * 60_000);
+
+  // Load adaptive skip map from DB before any API calls.
+  // Prevents wasted calls to aggregator+route pairs that are already known to be dead.
   // Skip the sweep if the DB already has quotes fresher than 30 min.
   // This prevents thundering-herd rate-limit blowout on container restarts / redeployments.
-  const sweepPromise = hasRecentQuotes(SKIP_SWEEP_IF_FRESH_MS).then(async (fresh) => {
+  const sweepPromise = loadSkipMap()
+    .catch((e) => logger.warn(e, 'Failed to load skip map — continuing without'))
+    .then(() => hasRecentQuotes(SKIP_SWEEP_IF_FRESH_MS))
+    .then(async (fresh) => {
     if (fresh) {
       logger.info(
         { component: 'scheduler' },

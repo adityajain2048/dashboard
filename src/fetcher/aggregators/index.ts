@@ -3,6 +3,7 @@ import type { Logger } from '../../lib/logger.js';
 import { logger as rootLogger } from '../../lib/logger.js';
 import { getAggregatorLimiter } from '../../lib/rate-limiter.js';
 import { insertFetchLog } from '../../db/queries.js';
+import { isSkipped, recordMiss, recordHit } from '../../lib/aggregator-skip.js';
 import { fetchLifi } from './lifi.js';
 import { fetchRango } from './rango.js';
 import { fetchBungee } from './bungee.js';
@@ -101,6 +102,22 @@ export async function fetchAllAggregators(
         return [];
       }
 
+      // Adaptive skip: this aggregator+route pair has returned no quotes
+      // for several consecutive cycles — skip until the cooldown expires.
+      if (isSkipped(id, route)) {
+        log.debug(
+          { src: route.src, dst: route.dst, asset: route.asset, amountTier: route.amountTier },
+          `${id}: adaptive skip (consecutive no-route misses)`
+        );
+        await insertFetchLog({
+          batchId, ts: new Date(), srcChain: route.src, dstChain: route.dst,
+          asset: route.asset, amountTier: route.amountTier, source: id,
+          bridge: null, status: 'skipped', responseMs: 0,
+          errorMessage: 'adaptive skip', quoteCount: 0,
+        }).catch(() => {});
+        return [];
+      }
+
       await limiter.acquire();
       if (limiter.isOpen()) return [];
 
@@ -114,6 +131,13 @@ export async function fetchAllAggregators(
         limiter.recordSuccess();
         const bridgesFound = result.map((q) => q.bridge);
         for (const q of result) bridgesSeen.add(q.bridge);
+
+        // Adaptive skip tracking: hit resets miss counter; silent empty counts as miss.
+        if (result.length > 0) {
+          recordHit(id, route);
+        } else {
+          recordMiss(id, route);
+        }
 
         log.debug({ responseMs, quotes: result.length, bridges: bridgesFound }, `${id} OK`);
 
@@ -143,6 +167,12 @@ export async function fetchAllAggregators(
         // Only real errors and timeouts count toward circuit breaker.
         if (!isNoRoute && !isHttp429) {
           limiter.recordFailure();
+        }
+
+        // Adaptive skip tracking: explicit no_route errors count as a miss.
+        // Timeouts and transient errors do NOT — those are infrastructure issues.
+        if (isNoRoute) {
+          recordMiss(id, route);
         }
 
         log.warn({ responseMs, status, error: errorMessage.slice(0, 120) }, `${id}: ${isTimeout ? 'timeout' : errorMessage.slice(0, 60)}`);
