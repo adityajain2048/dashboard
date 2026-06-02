@@ -258,6 +258,9 @@ export default async function bridgesRoutes(
              AND rs.last_seen > NOW() - INTERVAL '47 minutes'
              AND rl.output_usd::numeric > 0.01
              AND (rl.total_fee_bps IS NULL OR rl.total_fee_bps <= 1000)
+             AND NOT (rl.input_usd::numeric > 0
+                      AND rl.output_usd::numeric > rl.input_usd::numeric * 2
+                      AND rl.output_usd::numeric > 10)
            ORDER BY rl.src_chain, rl.dst_chain, rl.asset, rl.amount_tier,
                     rl.output_usd::numeric DESC
          )

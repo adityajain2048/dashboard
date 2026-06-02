@@ -379,30 +379,40 @@ export async function getQuotesForRoute(
     [src, dst, asset, tier]
   );
 
-  const quotes: NormalizedQuote[] = result.rows.map((row: RouteLatestRow) => ({
-    batchId: row.batch_id,
-    ts: row.ts,
-    srcChain: row.src_chain,
-    dstChain: row.dst_chain,
-    asset: row.asset as Asset,
-    amountTier: row.amount_tier,
-    source: row.source as NormalizedQuote['source'],
-    bridge: row.bridge,
-    inputAmount: row.input_amount,
-    outputAmount: row.output_amount,
-    inputUsd: row.input_usd,
-    outputUsd: row.output_usd,
-    gasCostUsd: row.gas_cost_usd,
-    protocolFeeBps: 0,
-    totalFeeBps: row.total_fee_bps,
-    totalFeeUsd: row.total_fee_usd,
-    estimatedSeconds: row.estimated_seconds,
-    isMultihop: false,
-    steps: 1,
-    // rank and spreadBps are recomputed below — do not use stored values
-    rank: undefined,
-    spreadBps: undefined,
-  }));
+  const quotes: NormalizedQuote[] = result.rows
+    .filter((row) => {
+      const outUsd = Number(row.output_usd);
+      const inUsd  = Number(row.input_usd ?? 0);
+      if (outUsd <= 0.01) return false;
+      if (row.total_fee_bps != null && row.total_fee_bps > 1000) return false;
+      // Reject price-feed inflation (e.g. Stargaze STARS mispricing)
+      if (inUsd > 0 && outUsd > inUsd * 2 && outUsd > 10) return false;
+      return true;
+    })
+    .map((row: RouteLatestRow) => ({
+      batchId: row.batch_id,
+      ts: row.ts,
+      srcChain: row.src_chain,
+      dstChain: row.dst_chain,
+      asset: row.asset as Asset,
+      amountTier: row.amount_tier,
+      source: row.source as NormalizedQuote['source'],
+      bridge: row.bridge,
+      inputAmount: row.input_amount,
+      outputAmount: row.output_amount,
+      inputUsd: row.input_usd,
+      outputUsd: row.output_usd,
+      gasCostUsd: row.gas_cost_usd,
+      protocolFeeBps: 0,
+      totalFeeBps: row.total_fee_bps,
+      totalFeeUsd: row.total_fee_usd,
+      estimatedSeconds: row.estimated_seconds,
+      isMultihop: false,
+      steps: 1,
+      // rank and spreadBps are recomputed below — do not use stored values
+      rank: undefined,
+      spreadBps: undefined,
+    }));
 
   // Re-rank globally using the canonical comparator (highest output wins).
   // This replaces batch-local stored rank/spreadBps with correct global values.
