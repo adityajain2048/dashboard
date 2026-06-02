@@ -3,6 +3,7 @@ import { getToken, isPlaceholder } from '../../config/tokens.js';
 import { getChain } from '../../config/chains.js';
 import { getFromAmountBase } from '../../lib/amounts.js';
 import { logger } from '../../lib/logger.js';
+import { fetchWithTimeout } from '../../lib/utils.js';
 
 /** Everclear (ex-Connext) supported chains — EVM only, major L1s+L2s */
 const EVERCLEAR_SUPPORTED = new Set([
@@ -37,15 +38,11 @@ export async function fetchEverclear(route: RouteKey): Promise<NormalizedQuote[]
       amount: amountBase,
     };
 
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 10_000);
-    const res = await fetch('https://api.everclear.org/intents/quote', {
+    const res = await fetchWithTimeout('https://api.everclear.org/intents/quote', {
       method: 'POST',
-      signal: controller.signal,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-    });
-    clearTimeout(t);
+    }, 10_000);
     if (!res.ok) return [];
 
     const data = (await res.json()) as {

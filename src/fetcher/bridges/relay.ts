@@ -3,6 +3,7 @@ import { getChain } from '../../config/chains.js';
 import { getToken } from '../../config/tokens.js';
 import { getFromAmountBase, humanToBase } from '../../lib/amounts.js';
 import { logger } from '../../lib/logger.js';
+import { fetchWithTimeout } from '../../lib/utils.js';
 
 export async function fetchRelay(route: RouteKey): Promise<NormalizedQuote[]> {
   try {
@@ -27,15 +28,11 @@ export async function fetchRelay(route: RouteKey): Promise<NormalizedQuote[]> {
       tradeType: 'EXACT_INPUT',
     };
 
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 10_000);
-    const res = await fetch('https://api.relay.link/quote', {
+    const res = await fetchWithTimeout('https://api.relay.link/quote', {
       method: 'POST',
-      signal: controller.signal,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-    });
-    clearTimeout(t);
+    }, 10_000);
     if (!res.ok) return [];
 
     const data = (await res.json()) as {

@@ -3,6 +3,7 @@ import type { Logger } from '../../lib/logger.js';
 import { logger as rootLogger } from '../../lib/logger.js';
 import { getAggregatorLimiter } from '../../lib/rate-limiter.js';
 import { insertFetchLog } from '../../db/queries.js';
+import { withTimeout } from '../../lib/utils.js';
 import { isSkipped, recordMiss, recordHit } from '../../lib/aggregator-skip.js';
 import { fetchLifi } from './lifi.js';
 import { fetchRango } from './rango.js';
@@ -52,22 +53,6 @@ registerAggregator('rubic', (route) =>
   })
 );
 registerAggregator('squid', fetchSquid);
-
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error('timeout')), ms);
-    promise.then(
-      (v) => {
-        clearTimeout(t);
-        resolve(v);
-      },
-      (e) => {
-        clearTimeout(t);
-        reject(e);
-      }
-    );
-  });
-}
 
 const circuitBreakLogged = new Set<AggregatorId>();
 

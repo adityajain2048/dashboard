@@ -5,6 +5,7 @@ import { getChain } from '../../config/chains.js';
 import { resolveBridgeName } from '../../config/bridges.js';
 import { getFromAmountBase, outputAmountToUsd } from '../../lib/amounts.js';
 import { logger } from '../../lib/logger.js';
+import { fetchWithTimeout } from '../../lib/utils.js';
 
 const BUNGEE_UNSUPPORTED = new Set<string>([
   'solana',
@@ -52,19 +53,9 @@ export async function fetchBungee(route: RouteKey): Promise<NormalizedQuote[]> {
   url.searchParams.set('sort', 'output');
   url.searchParams.set('singleTxOnly', 'true');
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10_000);
-  let res: Response;
-  try {
-    res = await fetch(url.toString(), {
-      signal: controller.signal,
-      headers: apiKey ? { 'API-KEY': apiKey } : {},
-    });
-  } catch (e) {
-    clearTimeout(timeout);
-    throw e;
-  }
-  clearTimeout(timeout);
+  const res = await fetchWithTimeout(url, {
+    headers: apiKey ? { 'API-KEY': apiKey } : {},
+  }, 10_000);
 
   if (!res.ok) {
     const errBody = await res.text().catch(() => '');

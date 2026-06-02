@@ -5,6 +5,7 @@ import { getChain } from '../../config/chains.js';
 import { resolveBridgeName } from '../../config/bridges.js';
 import { getFromAmountBase } from '../../lib/amounts.js';
 import { logger } from '../../lib/logger.js';
+import { fetchWithTimeout } from '../../lib/utils.js';
 
 const LIFI_UNSUPPORTED = new Set<string>([]);
 
@@ -132,24 +133,14 @@ export async function fetchLifi(route: RouteKey): Promise<NormalizedQuote[]> {
     options: { order: 'CHEAPEST' as const },
   };
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15_000);
-  let res: Response;
-  try {
-    res = await fetch('https://li.quest/v1/advanced/routes', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(apiKey ? { 'x-lifi-api-key': apiKey } : {}),
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-  } catch (e) {
-    clearTimeout(timeout);
-    throw e;
-  }
-  clearTimeout(timeout);
+  const res = await fetchWithTimeout('https://li.quest/v1/advanced/routes', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(apiKey ? { 'x-lifi-api-key': apiKey } : {}),
+    },
+    body: JSON.stringify(body),
+  }, 15_000);
 
   if (!res.ok) {
     const errBody = await res.text().catch(() => '');

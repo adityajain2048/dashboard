@@ -5,6 +5,7 @@ import { getChain } from '../../config/chains.js';
 import { resolveBridgeName } from '../../config/bridges.js';
 import { getFromAmountBase, outputAmountToUsd } from '../../lib/amounts.js';
 import { logger } from '../../lib/logger.js';
+import { fetchWithTimeout } from '../../lib/utils.js';
 
 /** Chains that Rango's /routing/best endpoint does not support (confirmed via 400 responses). */
 const RANGO_UNSUPPORTED = new Set([
@@ -102,21 +103,11 @@ export async function fetchRango(route: RouteKey): Promise<NormalizedQuote[]> {
     slippage: '1',
   };
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10_000);
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method: 'POST',
-      signal: controller.signal,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-  } catch (e) {
-    clearTimeout(timeout);
-    throw e;
-  }
-  clearTimeout(timeout);
+  const res = await fetchWithTimeout(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }, 10_000);
 
   if (!res.ok) {
     const errBody = await res.text().catch(() => '');

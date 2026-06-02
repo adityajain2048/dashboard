@@ -3,6 +3,7 @@ import { getToken, isPlaceholder } from '../../config/tokens.js';
 import { getChain } from '../../config/chains.js';
 import { getFromAmountBase } from '../../lib/amounts.js';
 import { logger } from '../../lib/logger.js';
+import { fetchWithTimeout } from '../../lib/utils.js';
 
 export async function fetchDebridge(route: RouteKey): Promise<NormalizedQuote[]> {
   try {
@@ -28,10 +29,7 @@ export async function fetchDebridge(route: RouteKey): Promise<NormalizedQuote[]>
     url.searchParams.set('srcChainTokenInAmount', amountBase);
     url.searchParams.set('prependOperatingExpenses', 'true');
 
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 10_000);
-    const res = await fetch(url.toString(), { signal: controller.signal });
-    clearTimeout(t);
+    const res = await fetchWithTimeout(url, {}, 10_000);
     if (!res.ok) return [];
 
     const data = (await res.json()) as {

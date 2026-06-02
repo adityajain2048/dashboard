@@ -3,6 +3,7 @@ import { getToken, isPlaceholder } from '../../config/tokens.js';
 import { getChain } from '../../config/chains.js';
 import { getFromAmountBase } from '../../lib/amounts.js';
 import { logger } from '../../lib/logger.js';
+import { fetchWithTimeout } from '../../lib/utils.js';
 
 export async function fetchSymbiosis(route: RouteKey): Promise<NormalizedQuote[]> {
   try {
@@ -39,16 +40,11 @@ export async function fetchSymbiosis(route: RouteKey): Promise<NormalizedQuote[]
       slippage: 100, // 1%
     };
 
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 10_000);
-    const res = await fetch('https://api-v2.symbiosis.finance/crosschain/v1/swap', {
+    const res = await fetchWithTimeout('https://api-v2.symbiosis.finance/crosschain/v1/swap', {
       method: 'POST',
-      signal: controller.signal,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-    });
-    clearTimeout(t);
-
+    }, 10_000);
     if (!res.ok) return [];
 
     const data = (await res.json()) as {

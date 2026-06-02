@@ -44,3 +44,39 @@ export async function retry<T>(
 export function generateBatchId(): string {
   return randomUUID();
 }
+
+/**
+ * Wrap any promise with a hard timeout. Rejects with `Error('timeout')` after `timeoutMs`.
+ * Used in aggregators/index.ts to cap the entire aggregator call (including retries inside).
+ */
+export function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('timeout')), timeoutMs);
+    promise.then(
+      (v) => { clearTimeout(t); resolve(v); },
+      (e) => { clearTimeout(t); reject(e); }
+    );
+  });
+}
+
+/**
+ * Fetch with a hard timeout. Aborts the request and rejects if `timeoutMs` elapses.
+ * Replaces the AbortController + setTimeout boilerplate used in every bridge/aggregator fetcher.
+ * The `opts` parameter must NOT include a `signal` — one is created internally.
+ */
+export async function fetchWithTimeout(
+  url: string | URL,
+  opts: Omit<RequestInit, 'signal'>,
+  timeoutMs: number
+): Promise<Response> {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...opts, signal: controller.signal });
+    clearTimeout(t);
+    return res;
+  } catch (e) {
+    clearTimeout(t);
+    throw e;
+  }
+}

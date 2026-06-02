@@ -5,6 +5,7 @@ import { isPlaceholder } from '../../config/tokens.js';
 import { resolveBridgeName } from '../../config/bridges.js';
 import { getFromAmountHuman, getFromAmountBase, humanToBase } from '../../lib/amounts.js';
 import { logger } from '../../lib/logger.js';
+import { fetchWithTimeout } from '../../lib/utils.js';
 
 /** Rubic uses 0x0 for native tokens (docs); we use LI.FI sentinel elsewhere */
 const NATIVE_SENTINEL = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
@@ -97,21 +98,11 @@ export async function fetchRubic(route: RouteKey, options?: RubicFetchOptions): 
     ...(apiKey ? { 'x-api-key': apiKey } : {}),
   };
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10_000);
-  let res: Response;
-  try {
-    res = await fetch('https://api-v2.rubic.exchange/api/routes/quoteBest', {
-      method: 'POST',
-      signal: controller.signal,
-      headers: baseHeaders,
-      body: JSON.stringify(body),
-    });
-  } catch (e) {
-    clearTimeout(timeout);
-    throw e;
-  }
-  clearTimeout(timeout);
+  let res = await fetchWithTimeout('https://api-v2.rubic.exchange/api/routes/quoteBest', {
+    method: 'POST',
+    headers: baseHeaders,
+    body: JSON.stringify(body),
+  }, 10_000);
 
   if (res.status === 404) return [];
 
@@ -127,16 +118,12 @@ export async function fetchRubic(route: RouteKey, options?: RubicFetchOptions): 
       for (let attempt = 0; attempt < maxRetries; attempt++) {
         const delayMs = 500 * Math.pow(2, attempt);
         await new Promise((r) => setTimeout(r, delayMs));
-        const retryController = new AbortController();
-        const retryTimeout = setTimeout(() => retryController.abort(), 10_000);
         try {
-          const retryRes = await fetch('https://api-v2.rubic.exchange/api/routes/quoteBest', {
+          const retryRes = await fetchWithTimeout('https://api-v2.rubic.exchange/api/routes/quoteBest', {
             method: 'POST',
-            signal: retryController.signal,
             headers: baseHeaders,
             body: JSON.stringify(body),
-          });
-          clearTimeout(retryTimeout);
+          }, 10_000);
           if (retryRes.ok) {
             res = retryRes;
             break;
@@ -145,7 +132,6 @@ export async function fetchRubic(route: RouteKey, options?: RubicFetchOptions): 
             throw new Error(`HTTP ${retryRes.status}: ${(await retryRes.text().catch(() => '')).slice(0, 100)}`);
           }
         } catch (retryErr) {
-          clearTimeout(retryTimeout);
           if (attempt === maxRetries - 1) {
             logger.debug({ route: `${route.src}→${route.dst}/${route.asset}/$${route.amountTier}`, status: 403 }, 'Rubic 403 after retries — skipping');
             return [];

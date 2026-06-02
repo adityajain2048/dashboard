@@ -3,6 +3,7 @@ import { getToken, isPlaceholder } from '../../config/tokens.js';
 import { getChain } from '../../config/chains.js';
 import { getFromAmountBase } from '../../lib/amounts.js';
 import { logger } from '../../lib/logger.js';
+import { fetchWithTimeout } from '../../lib/utils.js';
 
 /** cBridge token symbols — they use standard symbol names */
 const CBRIDGE_SYMBOL: Record<string, string> = {
@@ -39,15 +40,11 @@ export async function fetchCbridge(route: RouteKey): Promise<NormalizedQuote[]> 
       slippage_tolerance: 300, // 3%
     };
 
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 10_000);
-    const res = await fetch('https://cbridge-prod2.celer.app/v2/estimateAmt', {
+    const res = await fetchWithTimeout('https://cbridge-prod2.celer.app/v2/estimateAmt', {
       method: 'POST',
-      signal: controller.signal,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-    });
-    clearTimeout(t);
+    }, 10_000);
     if (!res.ok) return [];
 
     const data = (await res.json()) as {

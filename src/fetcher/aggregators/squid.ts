@@ -5,6 +5,7 @@ import { getToken, isPlaceholder } from '../../config/tokens.js';
 import { getChain } from '../../config/chains.js';
 import { getFromAmountBase } from '../../lib/amounts.js';
 import { logger } from '../../lib/logger.js';
+import { fetchWithTimeout } from '../../lib/utils.js';
 import type { Asset } from '../../types/index.js';
 import type { TokenEntry } from '../../types/index.js';
 
@@ -207,24 +208,14 @@ export async function fetchSquid(route: RouteKey): Promise<NormalizedQuote[]> {
     slippage:    1,
   };
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10_000);
-  let res: Response;
-  try {
-    res = await fetch(SQUID_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-integrator-id': getIntegratorId(),
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-  } catch (e) {
-    clearTimeout(timeout);
-    throw e;
-  }
-  clearTimeout(timeout);
+  const res = await fetchWithTimeout(SQUID_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-integrator-id': getIntegratorId(),
+    },
+    body: JSON.stringify(body),
+  }, 10_000);
 
   if (!res.ok) {
     const errBody = await res.text().catch(() => '');

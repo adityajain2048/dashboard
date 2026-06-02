@@ -2,6 +2,7 @@ import type { NormalizedQuote, RouteKey } from '../../types/index.js';
 import { getToken, isPlaceholder } from '../../config/tokens.js';
 import { getFromAmountBase } from '../../lib/amounts.js';
 import { logger } from '../../lib/logger.js';
+import { fetchWithTimeout } from '../../lib/utils.js';
 
 /** THORChain asset notation: CHAIN.SYMBOL */
 const THOR_ASSET: Record<string, Record<string, string>> = {
@@ -31,10 +32,7 @@ export async function fetchThorchain(route: RouteKey): Promise<NormalizedQuote[]
     url.searchParams.set('to_asset', toAsset);
     url.searchParams.set('amount', thorAmount);
 
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 10_000);
-    const res = await fetch(url.toString(), { signal: controller.signal });
-    clearTimeout(t);
+    const res = await fetchWithTimeout(url, {}, 10_000);
     if (!res.ok) return [];
 
     const data = (await res.json()) as {
