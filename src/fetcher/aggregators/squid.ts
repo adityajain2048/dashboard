@@ -27,12 +27,16 @@ function isSquidBanned(): boolean {
   return Date.now() < squidBannedUntil;
 }
 
-// Chains confirmed NOT in Squid's chain list (checked against /v2/sdk-info)
+// Chains confirmed NOT supported by Squid (verified against GET /v2/chains 2026-06-02).
+// Any chain whose chainId does not appear in Squid's chain list should be listed here
+// so we skip the API call and avoid accumulating false no_route misses for adaptive skip.
 const SQUID_UNSUPPORTED = new Set<string>([
-  'zksync',    // chainId 324 — not in Squid
-  'abstract',  // chainId 2741 — not in Squid
-  'unichain',  // chainId 130 — not in Squid
-  'megaeth',   // chainId 4326 — not in Squid
+  'zksync',    // chainId 324 — not in Squid chain list
+  'abstract',  // chainId 2741 — not in Squid chain list
+  'unichain',  // chainId 130 — not in Squid chain list
+  'megaeth',   // chainId 4326 — not in Squid chain list
+  // Note: monad (143), hyperliquid/HyperEVM (999), berachain (80094),
+  //       sonic (146), soneium (1868) ARE in Squid's chain list.
 ]);
 
 // ─── Chain category detection ───
