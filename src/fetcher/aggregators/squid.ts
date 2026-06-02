@@ -283,6 +283,17 @@ export async function fetchSquid(route: RouteKey): Promise<NormalizedQuote[]> {
   const totalFeeBps   = inputUsd > 0 ? Math.round((10000 * totalFeeUsd) / inputUsd) : 0;
   const protocolFeeBps = inputUsd > 0 ? Math.round((10000 * feeCostUsd) / inputUsd) : 0;
 
+  // Sanity: reject quotes where output is > 2× input. This catches Squid price-feed
+  // bugs on low-value Cosmos tokens (e.g. STARS) where toAmountUSD is wildly inflated.
+  // Legitimate routes with favourable rates stay within ~30% of input.
+  if (outputUsd > inputUsd * 2 && outputUsd > 10) {
+    logger.debug(
+      { route, inputUsd, outputUsd, bridge },
+      'Squid: output > 2× input — likely price-feed error, skipping'
+    );
+    return [];
+  }
+
   const quote: NormalizedQuote = {
     batchId:        '',
     ts:             new Date(),

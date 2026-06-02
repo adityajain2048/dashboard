@@ -121,8 +121,9 @@ export async function fetchRango(route: RouteKey): Promise<NormalizedQuote[]> {
   if (!res.ok) {
     const errBody = await res.text().catch(() => '');
     if (res.status === 403) {
-      // IP-level block (Cloudflare WAF on Azure egress) — back off 10 minutes
-      setRangoCooldown(10 * 60_000, '403 IP block');
+      // IP-level block (Cloudflare WAF on Azure egress) — back off 60 minutes.
+      // 10-minute cooldown was causing a retry storm every 10 min with 0 quotes.
+      setRangoCooldown(60 * 60_000, '403 IP block');
       return [];
     }
     if (res.status === 429) {

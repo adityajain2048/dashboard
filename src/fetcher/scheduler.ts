@@ -9,17 +9,17 @@ import { getGapCoverage, hasRecentQuotes, getSquidGapKeys } from '../db/queries.
 // ─── Concurrency constants ────────────────────────────────────────────────────
 
 /**
- * Sweep concurrency — 20 concurrent tasks ≈ 10–15 req/s to Squid (safe for free tier).
+ * Sweep concurrency — 24 concurrent tasks ≈ 12 req/s to Squid (confirmed safe at 720 rpm).
  * Previous value of 150 caused immediate 429 bans on every startup.
  */
-const SWEEP_CONCURRENCY = 20;
+const SWEEP_CONCURRENCY = 24;
 
 /**
  * T1 regular cycle concurrency.
- * T1 uses only fast aggregators (LI.FI + Squid), each ≥400 rpm.
- * 20 concurrent routes → ~34 batches × ~3s = ~100s total for 666 tasks.
+ * T1 uses only fast aggregators (LI.FI + Squid). Squid is 720 rpm (12/s), LI.FI 400 rpm.
+ * 24 concurrent routes → ~28 batches × ~3s ≈ 84s total for 666 tasks (within 5 min cycle).
  */
-const T1_CONCURRENCY = 20;
+const T1_CONCURRENCY = 24;
 
 /** T2/T3 refresh cycles — all aggregators including Rango (10 rpm). Keep low. */
 const REGULAR_CONCURRENCY = 5;
