@@ -1,7 +1,7 @@
 import type { NormalizedQuote, RouteKey } from '../../types/index.js';
 import { getChain } from '../../config/chains.js';
 import { getToken } from '../../config/tokens.js';
-import { getFromAmountHuman, getFromAmountBase, humanToBase } from '../../lib/amounts.js';
+import { getFromAmountBase, humanToBase } from '../../lib/amounts.js';
 import { logger } from '../../lib/logger.js';
 
 export async function fetchRelay(route: RouteKey): Promise<NormalizedQuote[]> {
@@ -19,9 +19,11 @@ export async function fetchRelay(route: RouteKey): Promise<NormalizedQuote[]> {
       user: '0x0000000000000000000000000000000000000000',
       originChainId: fromChainId,
       destinationChainId: toChainId,
-      originCurrency: route.asset,
-      destinationCurrency: route.asset,
-      amount: getFromAmountHuman(route.amountTier, route.asset, route.src),
+      // Relay expects contract addresses (0xeee...eee for native ETH), not asset symbols.
+      originCurrency: srcToken.address,
+      destinationCurrency: dstToken.address,
+      // amount in smallest unit (wei/atoms) — not a human-readable float.
+      amount: inputAmountBase,
       tradeType: 'EXACT_INPUT',
     };
 
