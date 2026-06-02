@@ -89,7 +89,7 @@ export function Insights({ asset, tier, onOpenRoute }: InsightsProps) {
             <HeroStat label="Avg best fee" value={fmtPct(kpis.avgFee)} accent="var(--squid-lime)"
               sub="across all live corridors" />
             <HeroStat label="Top aggregator" value={kpis.topAgg ? aggMeta(kpis.topAgg.id).name : '—'} accent="var(--squid-lavender)"
-              sub={kpis.topAgg ? `${kpis.topAgg.wins.toLocaleString()} routes won · ${kpis.topAgg.winPct}% share` : 'loading…'}
+              sub={kpis.topAgg ? ((kpis.topAgg.wins != null) ? `${kpis.topAgg.wins.toLocaleString()} routes won · ${kpis.topAgg.winPct ?? 0}% share` : `${kpis.topAgg.successRate}% success · ${kpis.topAgg.successCount.toLocaleString()} quotes`) : 'loading…'}
               dot={kpis.topAgg ? aggMeta(kpis.topAgg.id).color : undefined} />
             <HeroStat label="Top bridge" value={kpis.topBridge ? kpis.topBridge.name : '—'} accent="var(--fg-1)"
               sub={kpis.topBridge ? `${kpis.topBridge.wins.toLocaleString()} route wins` : 'loading…'}
