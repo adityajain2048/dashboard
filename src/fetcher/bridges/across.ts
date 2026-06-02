@@ -1,7 +1,7 @@
 import type { NormalizedQuote, RouteKey } from '../../types/index.js';
 import { getToken } from '../../config/tokens.js';
 import { getChain } from '../../config/chains.js';
-import { getFromAmountBase } from '../../lib/amounts.js';
+import { getFromAmountBase, outputAmountToUsd } from '../../lib/amounts.js';
 import { logger } from '../../lib/logger.js';
 
 export async function fetchAcross(route: RouteKey): Promise<NormalizedQuote[]> {
@@ -34,8 +34,12 @@ export async function fetchAcross(route: RouteKey): Promise<NormalizedQuote[]> {
     const totalRelayFee = data.totalRelayFee?.total ?? '0';
     const inputAmount = amountBase;
     const outputAmount = String(BigInt(inputAmount) - BigInt(totalRelayFee));
-    const outputUsd = String(Math.max(0, route.amountTier - Number(totalRelayFee) / 10 ** srcToken.decimals));
-    const totalFeeBps = route.amountTier > 0 ? Math.round((10000 * Number(totalRelayFee)) / (10 ** srcToken.decimals * route.amountTier)) : 0;
+    // Use outputAmountToUsd so ETH fees are correctly priced (token units → USD via live price).
+    // The old formula `route.amountTier - feeBaseUnits / 10^decimals` is correct for USDC
+    // (1 USDC = $1) but wrong for ETH (subtracts wei-amount as if it were dollars).
+    const outputUsd = outputAmountToUsd(outputAmount, dstToken.decimals, route.asset, route.dst);
+    const totalFeeUsdNum = Math.max(0, route.amountTier - outputUsd);
+    const totalFeeBps = route.amountTier > 0 ? Math.round((10000 * totalFeeUsdNum) / route.amountTier) : 0;
 
     const quote: NormalizedQuote = {
       batchId: '',
@@ -49,11 +53,11 @@ export async function fetchAcross(route: RouteKey): Promise<NormalizedQuote[]> {
       inputAmount,
       outputAmount,
       inputUsd: String(route.amountTier),
-      outputUsd,
+      outputUsd: String(outputUsd),
       gasCostUsd: '0',
       protocolFeeBps: totalFeeBps,
       totalFeeBps,
-      totalFeeUsd: totalRelayFee,
+      totalFeeUsd: String(totalFeeUsdNum),
       estimatedSeconds: data.estimatedFillTimeSec ?? 0,
       isMultihop: false,
       steps: 1,

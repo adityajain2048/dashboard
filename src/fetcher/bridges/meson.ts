@@ -1,6 +1,6 @@
 import type { NormalizedQuote, RouteKey } from '../../types/index.js';
 import { getToken } from '../../config/tokens.js';
-import { getFromAmountBase } from '../../lib/amounts.js';
+import { getFromAmountBase, outputAmountToUsd } from '../../lib/amounts.js';
 import { logger } from '../../lib/logger.js';
 
 export async function fetchMeson(route: RouteKey): Promise<NormalizedQuote[]> {
@@ -29,8 +29,9 @@ export async function fetchMeson(route: RouteKey): Promise<NormalizedQuote[]> {
     const totalFee = data.result?.totalFee ?? '0';
     const inputAmount = amountBase;
     const outputAmount = String(BigInt(inputAmount) - BigInt(totalFee));
-    const outputUsd = String(Math.max(0, route.amountTier - Number(totalFee) / 10 ** srcToken.decimals));
-    const totalFeeBps = route.amountTier > 0 ? Math.round((10000 * Number(totalFee)) / (10 ** srcToken.decimals * route.amountTier)) : 0;
+    const outputUsdNum = outputAmountToUsd(outputAmount, dstToken.decimals, route.asset, route.dst);
+    const totalFeeUsdNum = Math.max(0, route.amountTier - outputUsdNum);
+    const totalFeeBps = route.amountTier > 0 ? Math.round((10000 * totalFeeUsdNum) / route.amountTier) : 0;
 
     const quote: NormalizedQuote = {
       batchId: '',
@@ -44,11 +45,11 @@ export async function fetchMeson(route: RouteKey): Promise<NormalizedQuote[]> {
       inputAmount,
       outputAmount,
       inputUsd: String(route.amountTier),
-      outputUsd,
+      outputUsd: String(outputUsdNum),
       gasCostUsd: '0',
       protocolFeeBps: totalFeeBps,
       totalFeeBps,
-      totalFeeUsd: totalFee,
+      totalFeeUsd: String(totalFeeUsdNum),
       estimatedSeconds: 0,
       isMultihop: false,
       steps: 1,

@@ -164,9 +164,16 @@ export function computeRouteStatus(
   const thresholdMs = STALE_THRESHOLD_MS[refreshTier];
 
   // ── Valid rows: filter out garbage (broken output / fee outliers) ──────────
-  const validRows = rows.filter(
-    (r) => Number(r.output_usd) > 0.01 && (r.total_fee_bps == null || r.total_fee_bps <= 1000)
-  );
+  const validRows = rows.filter((r) => {
+    const outUsd = Number(r.output_usd);
+    const inUsd  = Number(r.input_usd ?? 0);
+    if (outUsd <= 0.01) return false;
+    if (r.total_fee_bps != null && r.total_fee_bps > 1000) return false;
+    // Reject price-feed inflation: output > 2× input is impossible on any real bridge.
+    // Catches Squid/Stargaze STARS mispricing (e.g. $50 in → $880 out shown as 0 fee).
+    if (inUsd > 0 && outUsd > inUsd * 2 && outUsd > 10) return false;
+    return true;
+  });
 
   // ── Basic counts (all rows, including invalid — counts reflect DB reality) ─
   const quoteCount = rows.length;
@@ -278,7 +285,7 @@ export async function updateRouteStatus(
   const refreshTier = getRouteTier(src, dst);
 
   const latestResult = await pool.query<RouteLatestInput>(
-    `SELECT bridge, source, output_usd, input_usd, total_fee_bps, ts
+    `SELECT bridge, source, output_usd, input_usd, total_fee_bps, estimated_seconds, ts
      FROM route_latest
      WHERE src_chain = $1 AND dst_chain = $2 AND asset = $3 AND amount_tier = $4`,
     [src, dst, asset, tier]
