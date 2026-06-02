@@ -100,10 +100,14 @@ function getCosmosPlaceholder(chainId: string): string {
 }
 
 // Squid-specific token address overrides for non-EVM chains
-// For Solana: use the actual SPL mint address from tokens.ts (So111... for SOL, EPjF... for USDC, etc.)
-// For Bitcoin: Squid uses "satoshi" as the native token identifier
+// Squid v2 uses 0xeee...eee as the native-token sentinel on ALL chains, including Solana.
+// Our tokens.ts stores So111... (wSOL SPL mint) which is correct for LI.FI/Bungee/Rango
+// but Squid rejects it and returns "Low liquidity" — the correct address for Squid is the
+// universal native-token sentinel it uses across EVM and non-EVM alike.
+// For Bitcoin: Squid uses "satoshi" as the native token identifier.
 function getSquidTokenAddress(_chainId: string, asset: Asset, token: TokenEntry, cat: SquidCategory): string {
   if (cat === 'bitcoin' && asset === 'ETH') return 'satoshi';
+  if (cat === 'solana' && asset === 'ETH') return '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
   return token.address;
 }
 
