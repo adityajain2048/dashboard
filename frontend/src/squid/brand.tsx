@@ -1,8 +1,10 @@
 /* ════════════════════════════════════════════════════════════════════════
    Squid brand primitives + shared UI atoms (ported from the design Brand.jsx).
    ════════════════════════════════════════════════════════════════════════ */
+import { useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { chainMeta, bridgeMeta, aggMeta, contrast } from './meta';
+import { CHAIN_LOGOS } from '../config/chains';
 
 /* ─── Squid mascot icon ─── */
 export function SquidMark({ size = 28, variant = 'lime' }: { size?: number; variant?: 'lime' | 'purple' | 'white' | 'black' }) {
@@ -32,16 +34,40 @@ export function SquidWordmark({ height = 20, dark = false }: { height?: number; 
   );
 }
 
-/* ─── Chain chip: brand-coloured rounded square w/ abbr ─── */
+/* ─── Chain chip: logo image w/ brand-color + abbr fallback ─── */
 export function ChainChip({ id, size = 26, ring = false }: { id: string; size?: number; ring?: boolean }) {
   const c = chainMeta(id);
+  const [imgFailed, setImgFailed] = useState(false);
+  const logoUrl = CHAIN_LOGOS[id];
+  const br = Math.round(size * 0.3);
+  const ringStyle = ring ? `0 0 0 2px var(--bg-1), 0 0 0 3px ${c.color}55` : undefined;
+
+  if (logoUrl && !imgFailed) {
+    return (
+      <div
+        title={c.name}
+        style={{ width: size, height: size, borderRadius: br, overflow: 'hidden', flexShrink: 0, boxShadow: ringStyle }}
+      >
+        <img
+          src={logoUrl}
+          alt={c.name}
+          width={size}
+          height={size}
+          style={{ display: 'block', width: size, height: size, objectFit: 'cover' }}
+          onError={() => setImgFailed(true)}
+        />
+      </div>
+    );
+  }
+
+  // Fallback: brand-colored square with abbreviation
   const fs = size <= 20 ? 7 : size <= 26 ? 8 : 9;
   const abbr = c.abbr.length > 4 ? c.abbr.slice(0, 4) : c.abbr;
   return (
     <div
       title={c.name}
       style={{
-        width: size, height: size, borderRadius: Math.round(size * 0.3),
+        width: size, height: size, borderRadius: br,
         background: c.color, display: 'flex', alignItems: 'center', justifyContent: 'center',
         flexShrink: 0,
         boxShadow: ring ? `0 0 0 2px var(--bg-1), 0 0 0 3px ${c.color}55` : 'inset 0 0 0 1px rgba(255,255,255,0.18)',

@@ -94,6 +94,74 @@ export const HEATMAP_ORDER: readonly string[] = [
   'persistence', 'agoric', 'archway', 'xion', 'elys', 'saga', 'migaloo',
 ];
 
+/**
+ * Chain logo URLs keyed by our chain slug.
+ * Source: DeFi Llama icons CDN (icons.llamao.fi).
+ * ChainChip falls back to brand-color + abbr on image load error.
+ */
+export const CHAIN_LOGOS: Record<string, string> = {
+  // ─── Tier 1 ───────────────────────────────────────────────────────────────
+  ethereum:    'https://icons.llamao.fi/icons/chains/rsz_ethereum.jpg',
+  arbitrum:    'https://icons.llamao.fi/icons/chains/rsz_arbitrum.jpg',
+  base:        'https://icons.llamao.fi/icons/chains/rsz_base.jpg',
+  optimism:    'https://icons.llamao.fi/icons/chains/rsz_optimism.jpg',
+  polygon:     'https://icons.llamao.fi/icons/chains/rsz_polygon.jpg',
+  bsc:         'https://icons.llamao.fi/icons/chains/rsz_bsc.jpg',
+  solana:      'https://icons.llamao.fi/icons/chains/rsz_solana.jpg',
+  // ─── Tier 2 ───────────────────────────────────────────────────────────────
+  avalanche:   'https://icons.llamao.fi/icons/chains/rsz_avax.jpg',
+  bitcoin:     'https://icons.llamao.fi/icons/chains/rsz_bitcoin.jpg',
+  monad:       'https://icons.llamao.fi/icons/chains/rsz_monad.jpg',
+  megaeth:     'https://icons.llamao.fi/icons/chains/rsz_megaeth.jpg',
+  linea:       'https://icons.llamao.fi/icons/chains/rsz_linea.jpg',
+  zksync:      'https://icons.llamao.fi/icons/chains/rsz_era.jpg',
+  scroll:      'https://icons.llamao.fi/icons/chains/rsz_scroll.jpg',
+  sonic:       'https://icons.llamao.fi/icons/chains/rsz_sonic.jpg',
+  mantle:      'https://icons.llamao.fi/icons/chains/rsz_mantle.jpg',
+  berachain:   'https://icons.llamao.fi/icons/chains/rsz_berachain.jpg',
+  hyperliquid: 'https://icons.llamao.fi/icons/chains/rsz_hyperliquid.jpg',
+  abstract:    'https://icons.llamao.fi/icons/chains/rsz_abstract.jpg',
+  unichain:    'https://icons.llamao.fi/icons/chains/rsz_unichain.jpg',
+  // ─── Tier 3 EVM ───────────────────────────────────────────────────────────
+  blast:       'https://icons.llamao.fi/icons/chains/rsz_blast.jpg',
+  celo:        'https://icons.llamao.fi/icons/chains/rsz_celo.jpg',
+  fantom:      'https://icons.llamao.fi/icons/chains/rsz_fantom.jpg',
+  fraxtal:     'https://icons.llamao.fi/icons/chains/rsz_fraxtal.jpg',
+  gnosis:      'https://icons.llamao.fi/icons/chains/rsz_xdai.jpg',
+  hedera:      'https://icons.llamao.fi/icons/chains/rsz_hbar.jpg',
+  filecoin:    'https://icons.llamao.fi/icons/chains/rsz_filecoin.jpg',
+  immutable:   'https://icons.llamao.fi/icons/chains/rsz_immutablex.jpg',
+  kava:        'https://icons.llamao.fi/icons/chains/rsz_kava.jpg',
+  moonbeam:    'https://icons.llamao.fi/icons/chains/rsz_moonbeam.jpg',
+  peaq:        'https://icons.llamao.fi/icons/chains/rsz_peaq.jpg',
+  soneium:     'https://icons.llamao.fi/icons/chains/rsz_soneium.jpg',
+  sui:         'https://icons.llamao.fi/icons/chains/rsz_sui.jpg',
+  // ─── Tier 3 Cosmos / IBC ──────────────────────────────────────────────────
+  osmosis:     'https://icons.llamao.fi/icons/chains/rsz_osmosis.jpg',
+  cosmoshub:   'https://icons.llamao.fi/icons/chains/rsz_cosmos.jpg',
+  neutron:     'https://icons.llamao.fi/icons/chains/rsz_neutron.jpg',
+  dydx:        'https://icons.llamao.fi/icons/chains/rsz_dydx.jpg',
+  sei:         'https://icons.llamao.fi/icons/chains/rsz_sei.jpg',
+  injective:   'https://icons.llamao.fi/icons/chains/rsz_injective.jpg',
+  celestia:    'https://icons.llamao.fi/icons/chains/rsz_celestia.jpg',
+  axelar:      'https://icons.llamao.fi/icons/chains/rsz_axelar.jpg',
+  kujira:      'https://icons.llamao.fi/icons/chains/rsz_kujira.jpg',
+  terra:       'https://icons.llamao.fi/icons/chains/rsz_terra.jpg',
+  dymension:   'https://icons.llamao.fi/icons/chains/rsz_dymension.jpg',
+  stargaze:    'https://icons.llamao.fi/icons/chains/rsz_stargaze.jpg',
+  akash:       'https://icons.llamao.fi/icons/chains/rsz_akash.jpg',
+  stride:      'https://icons.llamao.fi/icons/chains/rsz_stride.jpg',
+  juno:        'https://icons.llamao.fi/icons/chains/rsz_juno.jpg',
+  noble:       'https://icons.llamao.fi/icons/chains/rsz_noble.jpg',
+  persistence: 'https://icons.llamao.fi/icons/chains/rsz_persistence.jpg',
+  agoric:      'https://icons.llamao.fi/icons/chains/rsz_agoric.jpg',
+  archway:     'https://icons.llamao.fi/icons/chains/rsz_archway.jpg',
+  xion:        'https://icons.llamao.fi/icons/chains/rsz_xion.jpg',
+  elys:        'https://icons.llamao.fi/icons/chains/rsz_elys.jpg',
+  saga:        'https://icons.llamao.fi/icons/chains/rsz_saga.jpg',
+  migaloo:     'https://icons.llamao.fi/icons/chains/rsz_migaloo.jpg',
+};
+
 export const CHAIN_NAMES: Record<string, string> = Object.fromEntries(
   Object.values(CHAIN_META).map(c => [c.id, c.name])
 );
