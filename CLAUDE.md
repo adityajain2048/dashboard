@@ -32,7 +32,7 @@ src/
 
 ## Key Constants
 - Refresh: Tier 1 = 5min, Tier 2 = 12min, Tier 3 = 40min
-- Amount tiers: 50, 1000, 50000 (USD). **Implementation note:** T1 and T3 use a reduced set (T1: $1K only; T3: $1K only, USDC+ETH) to limit API volume; T2 uses all three amounts and all three assets.
+- Amount tiers: 50, 1000, 50000 (USD). All tiers use all three amounts. T3 uses a reduced asset set (USDC + ETH only, no USDT) to limit API volume on long-tail routes.
 - Assets: ETH, USDC, USDT
 - Stale threshold: > 47min for all tiers (one full refresh cycle); before that, routes stay active with live data
 
@@ -76,7 +76,7 @@ function getNextLifiKey(): string { return LIFI_KEYS[lifiKeyIndex++ % LIFI_KEYS.
 Call `getNextLifiKey()` on every LI.FI request. This lives in `src/config/bridges.ts` or `src/fetcher/aggregators/lifi.ts`.
 
 ## Error Handling
-- Aggregator timeout: 10s per call. On timeout, log + skip (don't block batch).
+- Aggregator timeout: 22s per call (LI.FI can be slow on complex routes). On timeout, log + skip (don't block batch).
 - Bridge API error: log + skip bridge for this cycle. Never retry inline.
 - DB write failure: log full batch to `fetch_log` with error. Don't crash.
 - All errors go through structured logger (pino). Never console.log.
