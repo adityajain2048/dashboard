@@ -60,6 +60,16 @@ function recalcSingleQuoteUsd(q: NormalizedQuote): NormalizedQuote | null {
     const inUsd = Number(q.inputUsd);
     const outUsd = Number(q.outputUsd);
     if (inUsd <= 0) return q; // can't compute, keep as-is
+    // Cross-asset sanity: no bridge turns $50 into $880. If outputUsd is more than
+    // 2× inputUsd (and a meaningful amount), the aggregator's price feed for the
+    // destination token is wrong (e.g. Squid mispricing STARS on Stargaze).
+    if (outUsd > inUsd * 2 && outUsd > 10) {
+      logger.debug(
+        { bridge: q.bridge, src: q.srcChain, dst: q.dstChain, asset: q.asset, inUsd, outUsd },
+        'Dropping cross-asset quote: outputUsd > 2× inputUsd (price-feed error)'
+      );
+      return null;
+    }
     const totalFeeUsd = Math.max(0, inUsd - outUsd);
     const gasUsd = Number(q.gasCostUsd);
     const protocolFeeUsd = Math.max(0, totalFeeUsd - gasUsd);
