@@ -28,7 +28,14 @@ export async function fetchMayan(route: RouteKey): Promise<NormalizedQuote[]> {
       eta?: number;
     };
     const outputAmount = data.effectiveAmountOut ?? '0';
-    const outputUsd = data.price != null ? String(route.amountTier * data.price) : String(route.amountTier);
+    if (!outputAmount || outputAmount === '0') return [];
+
+    const outputUsdNum = data.price != null ? route.amountTier * data.price : route.amountTier;
+    // Mayan's `price` is the output/input USD ratio — fees are implicit in the spread.
+    // Derive totalFeeUsd and totalFeeBps from (input - output) so ranking is correct.
+    const totalFeeUsdNum = Math.max(0, route.amountTier - outputUsdNum);
+    const totalFeeBps = route.amountTier > 0 ? Math.round((10000 * totalFeeUsdNum) / route.amountTier) : 0;
+
     const quote: NormalizedQuote = {
       batchId: '',
       ts: new Date(),
@@ -41,11 +48,11 @@ export async function fetchMayan(route: RouteKey): Promise<NormalizedQuote[]> {
       inputAmount: inputAmountBase,
       outputAmount: humanToBase(outputAmount, dstToken.decimals),
       inputUsd: String(route.amountTier),
-      outputUsd,
+      outputUsd: String(outputUsdNum),
       gasCostUsd: '0',
-      protocolFeeBps: 0,
-      totalFeeBps: 0,
-      totalFeeUsd: '0',
+      protocolFeeBps: totalFeeBps,
+      totalFeeBps,
+      totalFeeUsd: String(totalFeeUsdNum),
       estimatedSeconds: data.eta ?? 0,
       isMultihop: false,
       steps: 1,
