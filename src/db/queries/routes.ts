@@ -4,15 +4,15 @@ import { pool, query } from '../connection.js';
 import { selectBestQuote, selectWorstQuote, computeSpreadBps, reRankQuotes } from '../../lib/quoteRanking.js';
 
 /**
- * Stale threshold: a route is only marked stale after roughly one full refresh
- * cycle (~47 min) elapses without a new quote. Applied uniformly across tiers so
- * fast-tier routes don't flap to stale between cycles — before 47 min a route
- * keeps its `active`/`single-bridge` state with live data.
+ * Stale threshold: a route is only marked stale after ~3 hours elapses without a
+ * new quote. A full refresh cycle can take >2h, so a shorter window would flap
+ * fresh routes to stale mid-cycle. This is the window the matrix "best within 3
+ * hours" uses.
  */
 export const STALE_THRESHOLD_MS: Record<1 | 2 | 3, number> = {
-  1: 47 * 60 * 1000,  // 47 min (one full cycle)
-  2: 47 * 60 * 1000,  // 47 min (one full cycle)
-  3: 47 * 60 * 1000,  // 47 min (one full cycle)
+  1: 3 * 60 * 60 * 1000,  // 3 hours
+  2: 3 * 60 * 60 * 1000,  // 3 hours
+  3: 3 * 60 * 60 * 1000,  // 3 hours
 };
 
 /** A single row from route_latest as consumed by computeRouteStatus. */
