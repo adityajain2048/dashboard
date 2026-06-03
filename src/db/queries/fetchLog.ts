@@ -51,10 +51,16 @@ export async function loadAggregatorSkip(): Promise<AggregatorSkipRow[]> {
 }
 
 /**
- * Increment miss_count for a (route, aggregator) pair.
- * Sets skip_until based on miss_count thresholds:
- *   ≥ 8 consecutive misses  → skip for 24 hours
- *   ≥ 20 consecutive misses → skip for 7 days
+ * Increment miss_count for a (route, aggregator) pair and set skip_until.
+ *
+ * miss_count climbs every cycle until the first skip, then advances ~once per
+ * 24h skip window (the pair isn't called while skipped), so past the first skip
+ * each +1 ≈ one more day of continuous failure:
+ *   ≥ 8  misses → skip 24 hours (just went dead → re-probe daily)
+ *   ≥ 11 misses → skip 7 days   (≈3 days of daily failures → re-probe weekly)
+ *
+ * The old 7-day threshold of 20 was effectively unreachable: the 24h skip freezes
+ * the counter, so climbing from 8 to 20 would take ~12 days of daily re-probes.
  */
 export async function upsertAggregatorMiss(
   src: string,
@@ -72,7 +78,7 @@ export async function upsertAggregatorMiss(
        miss_count   = aggregator_route_skip.miss_count + 1,
        last_miss_at = NOW(),
        skip_until   = CASE
-         WHEN aggregator_route_skip.miss_count + 1 >= 20 THEN NOW() + INTERVAL '7 days'
+         WHEN aggregator_route_skip.miss_count + 1 >= 11 THEN NOW() + INTERVAL '7 days'
          WHEN aggregator_route_skip.miss_count + 1 >= 8  THEN NOW() + INTERVAL '24 hours'
          ELSE NULL
        END

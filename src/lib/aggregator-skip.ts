@@ -2,7 +2,7 @@
  * In-memory skip map for per-(route, aggregator) adaptive skipping.
  *
  * When an aggregator consistently returns no_route for a route, we stop querying
- * it for a cooldown period (24h after 8 consecutive misses, 7 days after 20).
+ * it for a cooldown period (24h after 8 consecutive misses, 7 days after 11).
  * This eliminates wasted API calls for the ~3,000+ route × aggregator pairs that
  * never return results.
  *
@@ -86,7 +86,7 @@ export function recordMiss(aggregator: AggregatorId, route: RouteKey): void {
       if (skipUntil) {
         const key = makeSkipKey(aggregator, route);
         skipMap.set(key, skipUntil);
-        const days = missCount >= 20 ? '7 days' : '24 hours';
+        const days = missCount >= 11 ? '7 days' : '24 hours';
         logger.debug(
           { aggregator, src: route.src, dst: route.dst, asset: route.asset, amountTier: route.amountTier, missCount },
           `Aggregator skip: ${aggregator} on ${route.src}→${route.dst} ${route.asset} skipped for ${days} (${missCount} consecutive misses)`
