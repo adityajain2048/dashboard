@@ -1,12 +1,13 @@
 # Bridge Rate Dashboard
 
 ## What This Is
-Cross-chain bridge rate comparison engine. Fetches quotes from aggregators (LI.FI, Rango, Bungee, Rubic) and direct bridge APIs, normalizes them, stores in TimescaleDB, exposes via REST API. 30 chains, 870 directional routes, 17 tracked bridges.
+Cross-chain bridge rate comparison engine. Fetches quotes from aggregators (LI.FI, Rango, Bungee, Rubic, Squid) and direct bridge APIs, normalizes them, stores in TimescaleDB, exposes via REST API. 56 chains, 3,080 directional routes (56×55), 5 aggregators, 17 tracked bridges.
 
 ## Tech Stack
 - **Runtime:** Node 20+ / TypeScript (strict mode)
 - **DB:** PostgreSQL 16 + TimescaleDB extension
 - **HTTP:** Fastify
+- **Rate limiting:** Bottleneck (adaptive, per-key) + p-retry for transient retries
 - **Driver:** pg (node-postgres) + pg-format for bulk inserts
 - **Container:** Docker Compose (TimescaleDB + app)
 - **No ORM.** Raw SQL with parameterized queries. Type-safe wrappers in `src/db/queries.ts`.
@@ -24,16 +25,17 @@ src/
 ```
 
 ## Architecture Rules
-1. **Aggregator-first, bridge gap-fill.** Always query aggregators first. Only call a bridge directly if it didn't appear in aggregator results for that route.
+1. **Aggregator-first, bridge gap-fill.** Always query aggregators first. Only call a bridge directly if it didn't appear in aggregator results for that route (`gapFill` in `src/fetcher/bridges/index.ts`, runs inside every `processRoute`). Scheduler-level flow: a one-time **Squid sweep** of all tasks on startup, then **gap-fill cycles** (non-Squid aggregators) for routes Squid doesn't cover, plus recurring T1/T2/T3 tier cycles.
 2. **Rubic dedup.** Skip any Rubic route where `provider` is `"lifi"` or `"rango"`.
 3. **Bulk inserts only.** Never INSERT one row at a time. Use pg-format multi-row INSERT.
 4. **No floating point for money.** Store amounts as strings (bigint-compatible). Fees in basis points (integer). USD values as numeric(20,8).
 5. **Every function is typed.** No `any`. Use discriminated unions for aggregator responses.
 
 ## Key Constants
-- Refresh: Tier 1 = 5min, Tier 2 = 12min, Tier 3 = 40min
+- Refresh: Tier 1 = 5min, Tier 2 = 12min, Tier 3 = 40min (`REFRESH_INTERVALS` in `src/config/routes.ts`)
 - Amount tiers: 50, 1000, 50000 (USD). All tiers use all three amounts. T3 uses a reduced asset set (USDC + ETH only, no USDT) to limit API volume on long-tail routes.
 - Assets: ETH, USDC, USDT
+- Tasks per cycle: T1 ≈ 648, T2 ≈ 714, T3 ≈ 17,214; full Squid sweep ≈ 18,576. A task = one (src, dst, asset, amountTier); each task fans out to multiple provider API calls.
 - Stale threshold: > 47min for all tiers (one full refresh cycle); before that, routes stay active with live data
 
 ## Build & Run
@@ -66,18 +68,16 @@ NODE_ENV=development
 LOG_LEVEL=info
 ```
 
-## LI.FI Key Rotation
-3 keys × 200 req/min = 600 req/min capacity. Use round-robin rotation:
-```typescript
-const LIFI_KEYS = [process.env.LIFI_API_KEY_1, process.env.LIFI_API_KEY_2, process.env.LIFI_API_KEY_3].filter(Boolean);
-let lifiKeyIndex = 0;
-function getNextLifiKey(): string { return LIFI_KEYS[lifiKeyIndex++ % LIFI_KEYS.length]!; }
-```
-Call `getNextLifiKey()` on every LI.FI request. This lives in `src/config/bridges.ts` or `src/fetcher/aggregators/lifi.ts`.
+## Rate Limiting (adaptive, `src/lib/rate-limiter.ts`)
+Every aggregator/bridge is rate-limited via **Bottleneck** wrapped in a `KeyedAdaptiveLimiter`:
+- **LI.FI** uses `KeyedAdaptiveLimiter` with **3 keys** (200 rpm each = 600 rpm total). Key selection is **least-loaded / round-robin at the limiter layer** — there is no longer a manual `getNextLifiKey()`; just call the LI.FI fetcher and the limiter picks the key.
+- Every other source uses `KeyedAdaptiveLimiter` with a single (`''`) key.
+- The limiter **adapts**: on 429 it drops its reservoir/rate and pauses, then **recovers** the rate as calls succeed (the `… rate recovering → X req/s` logs). Limiters are named `<source>:<keyTier>` (e.g. `squid:anon`, `hop:anon`).
 
 ## Error Handling
-- Aggregator timeout: 22s per call (LI.FI can be slow on complex routes). On timeout, log + skip (don't block batch).
-- Bridge API error: log + skip bridge for this cycle. Never retry inline.
+- Aggregator timeout: 30s hard cap on the entire p-retry loop per call (`AGGREGATOR_TIMEOUT_MS`; LI.FI can be slow on complex routes). On timeout, log + skip (don't block batch).
+- Retries: transient failures (network, 5xx) retry via **p-retry** (2 retries, jittered backoff). 400/404 = no_route and 429 = rate-limit are NOT retried and do NOT trip the circuit/skip logic.
+- Bridge API error: log + skip bridge for this cycle.
 - DB write failure: log full batch to `fetch_log` with error. Don't crash.
 - All errors go through structured logger (pino). Never console.log.
 
