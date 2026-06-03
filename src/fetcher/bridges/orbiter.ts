@@ -12,7 +12,7 @@ const ORBITER_SUPPORTED = new Set([
   'linea', 'zksync', 'scroll', 'mantle',
 ]);
 
-export async function fetchOrbiter(route: RouteKey): Promise<NormalizedQuote[]> {
+export async function fetchOrbiter(route: RouteKey, _key: string): Promise<NormalizedQuote[]> {
   try {
     if (!ORBITER_SUPPORTED.has(route.src) || !ORBITER_SUPPORTED.has(route.dst)) return [];
 

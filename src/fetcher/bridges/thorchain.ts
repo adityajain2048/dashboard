@@ -13,7 +13,7 @@ const THOR_ASSET: Record<string, Record<string, string>> = {
   bitcoin: { ETH: 'BTC.BTC' },
 };
 
-export async function fetchThorchain(route: RouteKey): Promise<NormalizedQuote[]> {
+export async function fetchThorchain(route: RouteKey, _key: string): Promise<NormalizedQuote[]> {
   try {
     const fromAsset = THOR_ASSET[route.src]?.[route.asset];
     const toAsset = THOR_ASSET[route.dst]?.[route.asset];

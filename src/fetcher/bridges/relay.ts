@@ -6,7 +6,7 @@ import { logger } from '../../lib/logger.js';
 import { fetchWithTimeout } from '../../lib/utils.js';
 import { RateLimitError } from '../../lib/errors.js';
 
-export async function fetchRelay(route: RouteKey): Promise<NormalizedQuote[]> {
+export async function fetchRelay(route: RouteKey, _key: string): Promise<NormalizedQuote[]> {
   try {
     const srcChain = getChain(route.src);
     const dstChain = getChain(route.dst);

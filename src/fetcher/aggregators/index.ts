@@ -46,7 +46,7 @@ function shouldUseRubic(route: RouteKey): boolean {
   return RUBIC_FALLBACK_CHAINS.has(route.src) || RUBIC_FALLBACK_CHAINS.has(route.dst);
 }
 
-export type AggregatorFetcher = (route: RouteKey) => Promise<NormalizedQuote[]>;
+export type AggregatorFetcher = (route: RouteKey, key: string) => Promise<NormalizedQuote[]>;
 
 /**
  * When set, only these aggregators are called (Rubic filter still applies).
@@ -66,8 +66,8 @@ export function registerAggregator(id: AggregatorId, fetcher: AggregatorFetcher)
 registerAggregator('lifi', fetchLifi);
 registerAggregator('rango', fetchRango);
 registerAggregator('bungee', fetchBungee);
-registerAggregator('rubic', (route) =>
-  fetchRubic(route, {
+registerAggregator('rubic', (route, key) =>
+  fetchRubic(route, key, {
     isFallbackOnlyRoute: RUBIC_FALLBACK_CHAINS.has(route.src) && RUBIC_FALLBACK_CHAINS.has(route.dst),
   })
 );
@@ -131,12 +131,13 @@ export async function fetchAllAggregators(
         // 429 (RateLimitError) aborts retrying and triggers permanent rate reduction.
         const result = await withTimeout(
           pRetry(
-            () => limiter.schedule(() => aggregatorRegistry[id](route)),
+            () => limiter.schedule((key) => aggregatorRegistry[id](route, key)),
             {
               ...RETRY_OPTIONS,
               onFailedAttempt: ({ error, attemptNumber, retriesLeft }) => {
                 if (error instanceof RateLimitError) {
-                  limiter.on429(error.retryAfterMs);
+                  // Pass error.key so KeyedAdaptiveLimiter penalises only that key.
+                  limiter.on429(error.retryAfterMs, error.key || undefined);
                   // AbortError stops p-retry — don't retry 429s inline.
                   throw new AbortError(error.message);
                 }

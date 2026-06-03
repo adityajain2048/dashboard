@@ -10,26 +10,6 @@ import { RateLimitError } from '../../lib/errors.js';
 
 const LIFI_UNSUPPORTED = new Set<string>([]);
 
-const LIFI_KEYS = [
-  process.env.LIFI_API_KEY_1,
-  process.env.LIFI_API_KEY_2,
-  process.env.LIFI_API_KEY_3,
-].filter(Boolean) as string[];
-
-let lifiKeyIndex = 0;
-
-/**
- * Pure round-robin across the 3 API keys.
- * Per-key ban tracking is removed — adaptive rate limiting in the coordinator
- * (AdaptiveLimiter.on429) handles 429 recovery for the aggregator as a whole.
- */
-function getNextLifiKey(): string {
-  if (LIFI_KEYS.length === 0) return '';
-  const key = LIFI_KEYS[lifiKeyIndex % LIFI_KEYS.length]!;
-  lifiKeyIndex++;
-  return key;
-}
-
 /** Resolve bridge for display: use canonical id if mapped, else raw tool key (so we keep all routes). */
 function bridgeId(toolKey: string): string {
   return resolveBridgeName('lifi', toolKey) ?? toolKey.toLowerCase();
@@ -71,7 +51,12 @@ const LifiAdvancedRoutesResponseSchema = z.object({
   unavailableRoutes: z.unknown().optional(),
 }).passthrough();
 
-export async function fetchLifi(route: RouteKey): Promise<NormalizedQuote[]> {
+/**
+ * `apiKey` is provided by the coordinator via KeyedAdaptiveLimiter.
+ * When all 3 keys are configured, each call receives a different key via
+ * round-robin / least-loaded selection at the limiter layer.
+ */
+export async function fetchLifi(route: RouteKey, apiKey: string): Promise<NormalizedQuote[]> {
   if (LIFI_UNSUPPORTED.has(route.src) || LIFI_UNSUPPORTED.has(route.dst)) {
     return [];
   }
@@ -101,9 +86,6 @@ export async function fetchLifi(route: RouteKey): Promise<NormalizedQuote[]> {
     : route.src === 'bitcoin' ? BITCOIN_PLACEHOLDER
     : EVM_PLACEHOLDER;
 
-  const apiKey = getNextLifiKey();
-  if (!apiKey) return []; // all keys are rate-limited; skip silently
-
   const body = {
     fromChainId,
     toChainId,
@@ -128,10 +110,10 @@ export async function fetchLifi(route: RouteKey): Promise<NormalizedQuote[]> {
     if (res.status === 404) return [];
     if (res.status === 429) {
       // Parse retry delay from response body, e.g. "retry in 40 minutes" — default 40 min.
-      // Throw RateLimitError so the coordinator reduces the adaptive rate for all LI.FI calls.
+      // Include the key so the coordinator penalises only this key, not all 3.
       const match = errBody.match(/retry in (\d+) minute/i);
       const retryAfterMs = match ? parseInt(match[1], 10) * 60_000 : 40 * 60_000;
-      throw new RateLimitError(retryAfterMs, 'lifi');
+      throw new RateLimitError(retryAfterMs, { source: 'lifi', key: apiKey });
     }
     throw new Error(`HTTP ${res.status}: ${errBody.slice(0, 100)}`);
   }

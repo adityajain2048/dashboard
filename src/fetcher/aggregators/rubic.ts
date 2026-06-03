@@ -60,7 +60,7 @@ export interface RubicFetchOptions {
   isFallbackOnlyRoute?: boolean;
 }
 
-export async function fetchRubic(route: RouteKey, options?: RubicFetchOptions): Promise<NormalizedQuote[]> {
+export async function fetchRubic(route: RouteKey, _key: string, options?: RubicFetchOptions): Promise<NormalizedQuote[]> {
   const srcToken = getToken(route.src, route.asset);
   const dstToken = getToken(route.dst, route.asset);
   if (isPlaceholder(srcToken) || isPlaceholder(dstToken)) return [];

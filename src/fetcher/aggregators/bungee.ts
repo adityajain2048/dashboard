@@ -27,7 +27,7 @@ const BungeeSchema = z.object({
   }).optional(),
 });
 
-export async function fetchBungee(route: RouteKey): Promise<NormalizedQuote[]> {
+export async function fetchBungee(route: RouteKey, _key: string): Promise<NormalizedQuote[]> {
   const srcChain = getChain(route.src);
   const dstChain = getChain(route.dst);
   if (srcChain.type === 'non-evm' || dstChain.type === 'non-evm') return [];

@@ -18,7 +18,7 @@ import { fetchStargate } from './stargate.js';
 import { fetchOrbiter } from './orbiter.js';
 import { fetchEverclear } from './everclear.js';
 
-export type BridgeFetcher = (route: RouteKey) => Promise<NormalizedQuote[]>;
+export type BridgeFetcher = (route: RouteKey, key: string) => Promise<NormalizedQuote[]>;
 
 export const bridgeRegistry: Record<string, BridgeFetcher> = {};
 
@@ -74,12 +74,12 @@ export async function gapFill(
       try {
         const result = await withTimeout(
           pRetry(
-            () => limiter.schedule(() => bridgeRegistry[bridge.id]!(routeKey)),
+            () => limiter.schedule((key) => bridgeRegistry[bridge.id]!(routeKey, key)),
             {
               ...BRIDGE_RETRY_OPTIONS,
               onFailedAttempt: ({ error }) => {
                 if (error instanceof RateLimitError) {
-                  limiter.on429(error.retryAfterMs);
+                  limiter.on429(error.retryAfterMs, error.key || undefined);
                   throw new AbortError(error.message);
                 }
                 limiter.recordFailure();

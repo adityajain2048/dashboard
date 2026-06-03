@@ -64,7 +64,7 @@ const STARGATE_POOL: Record<string, Record<string, string>> = {
   },
 };
 
-export async function fetchStargate(route: RouteKey): Promise<NormalizedQuote[]> {
+export async function fetchStargate(route: RouteKey, _key: string): Promise<NormalizedQuote[]> {
   try {
     const srcEid = STARGATE_EID[route.src];
     const dstEid = STARGATE_EID[route.dst];

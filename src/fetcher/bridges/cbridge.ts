@@ -13,7 +13,7 @@ const CBRIDGE_SYMBOL: Record<string, string> = {
   USDT: 'USDT',
 };
 
-export async function fetchCbridge(route: RouteKey): Promise<NormalizedQuote[]> {
+export async function fetchCbridge(route: RouteKey, _key: string): Promise<NormalizedQuote[]> {
   try {
     const srcChain = getChain(route.src);
     const dstChain = getChain(route.dst);

@@ -162,7 +162,7 @@ const SquidRouteResponseSchema = z.object({
 
 // ─── Main fetcher ───
 
-export async function fetchSquid(route: RouteKey): Promise<NormalizedQuote[]> {
+export async function fetchSquid(route: RouteKey, _key: string): Promise<NormalizedQuote[]> {
 
   const srcChain = getChain(route.src);
   const dstChain = getChain(route.dst);

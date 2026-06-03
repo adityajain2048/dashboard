@@ -65,7 +65,7 @@ const RangoResponseSchema = z.object({
 });
 
 
-export async function fetchRango(route: RouteKey): Promise<NormalizedQuote[]> {
+export async function fetchRango(route: RouteKey, _key: string): Promise<NormalizedQuote[]> {
   if (RANGO_UNSUPPORTED.has(route.src) || RANGO_UNSUPPORTED.has(route.dst)) return [];
 
   const srcToken = getToken(route.src, route.asset);

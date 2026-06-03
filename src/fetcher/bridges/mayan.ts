@@ -5,7 +5,7 @@ import { logger } from '../../lib/logger.js';
 import { fetchWithTimeout } from '../../lib/utils.js';
 import { RateLimitError } from '../../lib/errors.js';
 
-export async function fetchMayan(route: RouteKey): Promise<NormalizedQuote[]> {
+export async function fetchMayan(route: RouteKey, _key: string): Promise<NormalizedQuote[]> {
   try {
     const srcToken = getToken(route.src, route.asset);
     const dstToken = getToken(route.dst, route.asset);

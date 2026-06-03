@@ -20,7 +20,7 @@ const HOP_CHAIN: Record<string, string> = {
 /** Hop supported tokens */
 const HOP_TOKENS = new Set(['ETH', 'USDC', 'USDT']);
 
-export async function fetchHop(route: RouteKey): Promise<NormalizedQuote[]> {
+export async function fetchHop(route: RouteKey, _key: string): Promise<NormalizedQuote[]> {
   try {
     const fromChain = HOP_CHAIN[route.src];
     const toChain = HOP_CHAIN[route.dst];

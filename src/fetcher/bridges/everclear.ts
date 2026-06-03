@@ -12,7 +12,7 @@ const EVERCLEAR_SUPPORTED = new Set([
   'linea', 'mantle',
 ]);
 
-export async function fetchEverclear(route: RouteKey): Promise<NormalizedQuote[]> {
+export async function fetchEverclear(route: RouteKey, _key: string): Promise<NormalizedQuote[]> {
   try {
     if (!EVERCLEAR_SUPPORTED.has(route.src) || !EVERCLEAR_SUPPORTED.has(route.dst)) return [];
     // Everclear primarily supports stablecoins
