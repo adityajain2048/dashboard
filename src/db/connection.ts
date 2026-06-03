@@ -18,6 +18,12 @@ const pool = new Pool({
   connectionTimeoutMillis: 10000,
   keepAlive: true,
   keepAliveInitialDelayMillis: 10000,
+  // Azure PostgreSQL Flexible Server requires SSL but uses a non-public CA.
+  // Newer pg-connection-string (≥2.7) started doing strict cert verification
+  // for sslmode=require, which causes "Connection terminated unexpectedly" on
+  // startup. Explicitly override: use SSL encryption but skip cert verification
+  // (matches sslmode=require semantics under libpq / the production requirement).
+  ssl: { rejectUnauthorized: false },
 });
 
 // Log idle client errors so we know when connections drop — pg auto-removes
