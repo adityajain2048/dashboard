@@ -458,3 +458,21 @@ export async function hasRecentQuotes(withinMs: number): Promise<boolean> {
   );
   return result.rows[0]?.exists ?? false;
 }
+
+/**
+ * Returns true if Squid specifically has any quotes newer than `withinMs` ms.
+ * Used by the scheduler to decide whether to skip the Squid sweep on restart.
+ * Unlike hasRecentQuotes, this ignores LI.FI / Bungee / Rango freshness — only
+ * Squid data counts. This prevents the sweep from being skipped just because
+ * other aggregators have fresh data while Squid's data is completely stale.
+ */
+export async function hasRecentSquidQuotes(withinMs: number): Promise<boolean> {
+  const result = await query<{ exists: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM route_latest
+       WHERE source = 'squid' AND ts > NOW() - $1::interval
+     ) AS exists`,
+    [`${withinMs} milliseconds`]
+  );
+  return result.rows[0]?.exists ?? false;
+}

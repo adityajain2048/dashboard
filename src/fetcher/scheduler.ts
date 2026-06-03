@@ -4,7 +4,7 @@ import { processRoute } from './pipeline.js';
 import { generateBatchId, chunk } from '../lib/utils.js';
 import { logger } from '../lib/logger.js';
 import { refreshNativePrices } from '../lib/prices.js';
-import { getGapCoverage, hasRecentQuotes, getSquidGapKeys } from '../db/queries.js';
+import { getGapCoverage, hasRecentQuotes, hasRecentSquidQuotes, getSquidGapKeys } from '../db/queries.js';
 import { loadSkipMap } from '../lib/aggregator-skip.js';
 
 // ─── Concurrency constants ────────────────────────────────────────────────────
@@ -393,22 +393,29 @@ export function startScheduler(): void {
 
   // Load adaptive skip map from DB before any API calls.
   // Prevents wasted calls to aggregator+route pairs that are already known to be dead.
-  // Skip the sweep if the DB already has quotes fresher than 30 min.
-  // This prevents thundering-herd rate-limit blowout on container restarts / redeployments.
+  // Skip the sweep only if SQUID specifically has recent quotes (within 30 min).
+  // Using hasRecentSquidQuotes (not hasRecentQuotes) is critical: LI.FI/Bungee data
+  // being fresh should NOT suppress the Squid sweep — if Squid's data is stale (e.g.
+  // after a rate-limit event), we must re-sweep all routes through Squid regardless of
+  // what other aggregators have stored.
   const sweepPromise = loadSkipMap()
     .catch((e) => logger.warn(e, 'Failed to load skip map — continuing without'))
-    .then(() => hasRecentQuotes(SKIP_SWEEP_IF_FRESH_MS))
-    .then(async (fresh) => {
-    if (fresh) {
+    .then(() => hasRecentSquidQuotes(SKIP_SWEEP_IF_FRESH_MS))
+    .then(async (squidFresh) => {
+    if (squidFresh) {
       logger.info(
         { component: 'scheduler' },
-        'Recent quotes found in DB — skipping Squid sweep, populating gap keys from DB'
+        'Recent Squid quotes found in DB — skipping Squid sweep, populating gap keys from DB'
       );
       // Even when sweep is skipped, we must populate squidGapKeys from DB so gap fill
       // correctly identifies routes Squid doesn't cover (non-Squid aggregators fill those).
       await refreshGapKeysFromDB();
       return;
     }
+    logger.info(
+      { component: 'scheduler' },
+      'No recent Squid quotes in DB — running full Squid sweep to index all routes'
+    );
     await runSquidSweep();
     // After sweep: re-derive gap keys from DB. This is more accurate than sweep results
     // because sweep-time 429 cooldowns produce false-positive gaps (routes Squid CAN cover
