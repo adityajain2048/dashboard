@@ -222,6 +222,7 @@ export default async function bridgesRoutes(
   // ─── GET /bridges/health ───
   app.get('/bridges/health', async (_req, reply) => {
     const [aggRes, livenessRes, winsRes] = await Promise.all([
+      // Only the 5 real aggregators — exclude 'direct' (gap-fill bridge calls)
       query<AggHealthRow>(
         `SELECT source,
            COUNT(*) FILTER (WHERE status = 'success') AS success_count,
@@ -232,6 +233,7 @@ export default async function bridgesRoutes(
            AVG(response_ms) FILTER (WHERE status = 'success') AS avg_response_ms
          FROM fetch_log
          WHERE ts > NOW() - INTERVAL '24 hours'
+           AND source IN ('lifi', 'rango', 'bungee', 'rubic', 'squid')
          GROUP BY source`
       ),
       query<BridgeLivenessRow>(
@@ -241,9 +243,11 @@ export default async function bridgesRoutes(
          FROM route_latest
          GROUP BY bridge`
       ),
-      // For each live route, find the single quote with the highest output_usd
-      // (across all bridges and sources). Credit the aggregator that sourced it.
-      // This answers: "which aggregator consistently finds the best price?"
+      // For each live route, among aggregator-sourced quotes only, find the one
+      // with the highest output_usd and credit that aggregator with a win.
+      // Restricting to aggregator sources ensures fair head-to-head comparison:
+      // direct bridge calls (source='direct') are excluded so they cannot dilute
+      // aggregator win counts or inflate the winPct denominator.
       query<AggWinsRow>(
         `WITH best_per_route AS (
            SELECT DISTINCT ON (rl.src_chain, rl.dst_chain, rl.asset, rl.amount_tier)
@@ -256,6 +260,7 @@ export default async function bridgesRoutes(
              AND rs.amount_tier = rl.amount_tier
            WHERE rs.state IN ('active', 'single-bridge')
              AND rs.last_seen > NOW() - INTERVAL '47 minutes'
+             AND rl.source IN ('lifi', 'rango', 'bungee', 'rubic', 'squid')
              AND rl.output_usd::numeric > 0.01
              AND (rl.total_fee_bps IS NULL OR rl.total_fee_bps <= 1000)
              AND NOT (rl.input_usd::numeric > 0
