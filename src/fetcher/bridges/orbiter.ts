@@ -4,6 +4,7 @@ import { getChain } from '../../config/chains.js';
 import { getFromAmountBase } from '../../lib/amounts.js';
 import { logger } from '../../lib/logger.js';
 import { fetchWithTimeout } from '../../lib/utils.js';
+import { RateLimitError } from '../../lib/errors.js';
 
 /** Orbiter uses EVM chain IDs directly */
 const ORBITER_SUPPORTED = new Set([
@@ -42,6 +43,7 @@ export async function fetchOrbiter(route: RouteKey): Promise<NormalizedQuote[]> 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }, 10_000);
+    if (res.status === 429) throw new RateLimitError(Math.max(parseInt(res.headers.get('retry-after') ?? '0', 10) * 1000, 60_000));
     if (!res.ok) return [];
 
     const data = (await res.json()) as {
@@ -85,6 +87,7 @@ export async function fetchOrbiter(route: RouteKey): Promise<NormalizedQuote[]> 
     };
     return [quote];
   } catch (e) {
+    if (e instanceof RateLimitError) throw e;
     logger.debug({ route, error: e }, 'Orbiter fetch failed');
     return [];
   }

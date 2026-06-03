@@ -6,6 +6,7 @@ import { getChain } from '../../config/chains.js';
 import { getFromAmountBase } from '../../lib/amounts.js';
 import { logger } from '../../lib/logger.js';
 import { fetchWithTimeout } from '../../lib/utils.js';
+import { RateLimitError } from '../../lib/errors.js';
 import type { Asset } from '../../types/index.js';
 import type { TokenEntry } from '../../types/index.js';
 
@@ -13,19 +14,6 @@ const SQUID_API_URL = 'https://v2.api.squidrouter.com/v2/route';
 
 function getIntegratorId(): string {
   return process.env.SQUID_INTEGRATOR_ID ?? 'bridge-dashboard-ccf44383-88be-4758-8b61-a813f76e4';
-}
-
-/** Squid global 429 cooldown — one integrator ID, so one shared backoff */
-let squidBannedUntil = 0;
-
-function setSquidCooldown(retryAfterMs: number): void {
-  squidBannedUntil = Date.now() + retryAfterMs;
-  const retryAfterSec = Math.ceil(retryAfterMs / 1000);
-  logger.warn({ retryAfterSec }, 'Squid rate-limited — cooling down');
-}
-
-function isSquidBanned(): boolean {
-  return Date.now() < squidBannedUntil;
 }
 
 // Chains confirmed NOT supported by Squid (verified against GET /v2/chains 2026-06-02).
@@ -175,7 +163,6 @@ const SquidRouteResponseSchema = z.object({
 // ─── Main fetcher ───
 
 export async function fetchSquid(route: RouteKey): Promise<NormalizedQuote[]> {
-  if (isSquidBanned()) return []; // cooling down — skip silently
 
   const srcChain = getChain(route.src);
   const dstChain = getChain(route.dst);
@@ -231,14 +218,11 @@ export async function fetchSquid(route: RouteKey): Promise<NormalizedQuote[]> {
       }
       return [];
     }
-    // 429 = rate limited — back off and skip silently
+    // 429 — throw RateLimitError so the coordinator can reduce the adaptive rate.
     if (res.status === 429) {
-      // Honour Retry-After header but enforce a 60s minimum to prevent rapid re-bans.
       const retryHeader = res.headers.get('retry-after');
-      const headerMs = retryHeader ? parseInt(retryHeader, 10) * 1000 : 0;
-      const retryAfterMs = Math.max(headerMs, 60_000);
-      setSquidCooldown(retryAfterMs);
-      return [];
+      const retryAfterMs = Math.max(retryHeader ? parseInt(retryHeader, 10) * 1000 : 0, 60_000);
+      throw new RateLimitError(retryAfterMs, 'squid');
     }
     // Squid returns 500 for thin-liquidity routes ("Low liquidity") — treat as no-route
     if (res.status === 500) {

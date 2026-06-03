@@ -6,6 +6,7 @@ import { resolveBridgeName } from '../../config/bridges.js';
 import { getFromAmountHuman, getFromAmountBase, humanToBase } from '../../lib/amounts.js';
 import { logger } from '../../lib/logger.js';
 import { fetchWithTimeout } from '../../lib/utils.js';
+import { RateLimitError } from '../../lib/errors.js';
 
 /** Rubic uses 0x0 for native tokens (docs); we use LI.FI sentinel elsewhere */
 const NATIVE_SENTINEL = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
@@ -110,8 +111,8 @@ export async function fetchRubic(route: RouteKey, options?: RubicFetchOptions): 
     // Read body only once here — avoids "Body already read" when response is OK
     const errBody = await res.text().catch(() => '');
     if (res.status === 429) {
-      logger.debug({ route: `${route.src}→${route.dst}/${route.asset}/$${route.amountTier}`, status: res.status }, 'Rubic rate limited — skipping');
-      return [];
+      const retryAfterMs = Math.max(parseInt(res.headers.get('retry-after') ?? '0', 10) * 1000, 60_000);
+      throw new RateLimitError(retryAfterMs, 'rubic');
     }
     if (res.status === 403) {
       const maxRetries = 2;

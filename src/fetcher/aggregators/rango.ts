@@ -6,6 +6,7 @@ import { resolveBridgeName } from '../../config/bridges.js';
 import { getFromAmountBase, outputAmountToUsd } from '../../lib/amounts.js';
 import { logger } from '../../lib/logger.js';
 import { fetchWithTimeout } from '../../lib/utils.js';
+import { RateLimitError } from '../../lib/errors.js';
 
 /** Chains that Rango's /routing/best endpoint does not support (confirmed via 400 responses). */
 const RANGO_UNSUPPORTED = new Set([
@@ -63,20 +64,8 @@ const RangoResponseSchema = z.object({
   error: z.string().nullable().optional(),
 });
 
-/** Global cooldown: 403 = IP block (10 min), 429 = rate limit (2 min) */
-let rangoBannedUntil = 0;
-
-function setRangoCooldown(retryAfterMs: number, reason: string): void {
-  rangoBannedUntil = Date.now() + retryAfterMs;
-  logger.warn({ retryAfterMin: Math.ceil(retryAfterMs / 60_000), reason }, 'Rango blocked — cooling down');
-}
-
-function isRangoBanned(): boolean {
-  return Date.now() < rangoBannedUntil;
-}
 
 export async function fetchRango(route: RouteKey): Promise<NormalizedQuote[]> {
-  if (isRangoBanned()) return [];
   if (RANGO_UNSUPPORTED.has(route.src) || RANGO_UNSUPPORTED.has(route.dst)) return [];
 
   const srcToken = getToken(route.src, route.asset);
@@ -112,16 +101,13 @@ export async function fetchRango(route: RouteKey): Promise<NormalizedQuote[]> {
   if (!res.ok) {
     const errBody = await res.text().catch(() => '');
     if (res.status === 403) {
-      // IP-level block (Cloudflare WAF on Azure egress) — back off 60 minutes.
-      // 10-minute cooldown was causing a retry storm every 10 min with 0 quotes.
-      setRangoCooldown(60 * 60_000, '403 IP block');
-      return [];
+      // IP-level block (Cloudflare WAF on Azure egress) — treat as a long rate-limit.
+      throw new RateLimitError(60 * 60_000, 'rango');
     }
     if (res.status === 429) {
       const retryHeader = res.headers.get('retry-after');
       const retryAfterMs = Math.max(retryHeader ? parseInt(retryHeader, 10) * 1000 : 0, 2 * 60_000);
-      setRangoCooldown(retryAfterMs, '429 rate limit');
-      return [];
+      throw new RateLimitError(retryAfterMs, 'rango');
     }
     throw new Error(`HTTP ${res.status}: ${errBody.slice(0, 100)}`);
   }

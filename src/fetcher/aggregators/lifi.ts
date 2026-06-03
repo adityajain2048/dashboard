@@ -6,6 +6,7 @@ import { resolveBridgeName } from '../../config/bridges.js';
 import { getFromAmountBase } from '../../lib/amounts.js';
 import { logger } from '../../lib/logger.js';
 import { fetchWithTimeout } from '../../lib/utils.js';
+import { RateLimitError } from '../../lib/errors.js';
 
 const LIFI_UNSUPPORTED = new Set<string>([]);
 
@@ -17,36 +18,16 @@ const LIFI_KEYS = [
 
 let lifiKeyIndex = 0;
 
-/** Per-key ban tracking: key → timestamp when ban lifts */
-const keyBanUntil = new Map<string, number>();
-
-function banKey(key: string, retryAfterMs: number): void {
-  keyBanUntil.set(key, Date.now() + retryAfterMs);
-  const retryAfterMin = Math.ceil(retryAfterMs / 60_000);
-  logger.warn({ keyPrefix: key.slice(0, 8), retryAfterMin }, 'LI.FI key rate-limited — cooling down');
-}
-
 /**
- * Returns the next non-banned key using round-robin.
- * Returns '' if ALL keys are currently banned — callers should skip LI.FI entirely.
+ * Pure round-robin across the 3 API keys.
+ * Per-key ban tracking is removed — adaptive rate limiting in the coordinator
+ * (AdaptiveLimiter.on429) handles 429 recovery for the aggregator as a whole.
  */
 function getNextLifiKey(): string {
   if (LIFI_KEYS.length === 0) return '';
-  const now = Date.now();
-  // Try each key once starting from current index; skip banned ones
-  for (let attempt = 0; attempt < LIFI_KEYS.length; attempt++) {
-    const idx = lifiKeyIndex % LIFI_KEYS.length;
-    lifiKeyIndex++;
-    const key = LIFI_KEYS[idx]!;
-    if ((keyBanUntil.get(key) ?? 0) <= now) {
-      return key;
-    }
-  }
-  // All keys are banned
-  const soonestUnban = Math.min(...LIFI_KEYS.map((k) => keyBanUntil.get(k) ?? 0));
-  const secsLeft = Math.ceil((soonestUnban - now) / 1000);
-  logger.warn({ secsLeft }, 'All LI.FI keys rate-limited — skipping LI.FI this cycle');
-  return '';
+  const key = LIFI_KEYS[lifiKeyIndex % LIFI_KEYS.length]!;
+  lifiKeyIndex++;
+  return key;
 }
 
 /** Resolve bridge for display: use canonical id if mapped, else raw tool key (so we keep all routes). */
@@ -146,11 +127,11 @@ export async function fetchLifi(route: RouteKey): Promise<NormalizedQuote[]> {
     const errBody = await res.text().catch(() => '');
     if (res.status === 404) return [];
     if (res.status === 429) {
-      // Parse retry delay from message, e.g. "retry in 40 minutes" — default 40 min
+      // Parse retry delay from response body, e.g. "retry in 40 minutes" — default 40 min.
+      // Throw RateLimitError so the coordinator reduces the adaptive rate for all LI.FI calls.
       const match = errBody.match(/retry in (\d+) minute/i);
       const retryAfterMs = match ? parseInt(match[1], 10) * 60_000 : 40 * 60_000;
-      banKey(apiKey, retryAfterMs);
-      return []; // don't throw — let Squid/Bungee/Rango cover this route
+      throw new RateLimitError(retryAfterMs, 'lifi');
     }
     throw new Error(`HTTP ${res.status}: ${errBody.slice(0, 100)}`);
   }

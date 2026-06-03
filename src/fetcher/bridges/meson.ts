@@ -3,6 +3,7 @@ import { getToken } from '../../config/tokens.js';
 import { getFromAmountBase, outputAmountToUsd } from '../../lib/amounts.js';
 import { logger } from '../../lib/logger.js';
 import { fetchWithTimeout } from '../../lib/utils.js';
+import { RateLimitError } from '../../lib/errors.js';
 
 export async function fetchMeson(route: RouteKey): Promise<NormalizedQuote[]> {
   try {
@@ -18,6 +19,7 @@ export async function fetchMeson(route: RouteKey): Promise<NormalizedQuote[]> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }, 10_000);
+    if (res.status === 429) throw new RateLimitError(Math.max(parseInt(res.headers.get('retry-after') ?? '0', 10) * 1000, 60_000));
     if (!res.ok) return [];
 
     const data = (await res.json()) as {
@@ -53,6 +55,7 @@ export async function fetchMeson(route: RouteKey): Promise<NormalizedQuote[]> {
     };
     return [quote];
   } catch (e) {
+    if (e instanceof RateLimitError) throw e;
     logger.debug({ route, error: e }, 'Meson fetch failed');
     return [];
   }

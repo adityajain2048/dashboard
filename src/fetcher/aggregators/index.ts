@@ -1,7 +1,9 @@
+import pRetry, { AbortError } from 'p-retry';
 import type { NormalizedQuote, RouteKey, AggregatorId } from '../../types/index.js';
 import type { Logger } from '../../lib/logger.js';
 import { logger as rootLogger } from '../../lib/logger.js';
 import { getAggregatorLimiter } from '../../lib/rate-limiter.js';
+import { RateLimitError } from '../../lib/errors.js';
 import { insertFetchLog } from '../../db/queries.js';
 import { withTimeout } from '../../lib/utils.js';
 import { isSkipped, recordMiss, recordHit } from '../../lib/aggregator-skip.js';
@@ -11,12 +13,29 @@ import { fetchBungee } from './bungee.js';
 import { fetchRubic } from './rubic.js';
 import { fetchSquid } from './squid.js';
 
-// Give LI.FI enough time for complex/slow routes (monad, berachain, etc. can take 12-15s)
-const AGGREGATOR_TIMEOUT_MS = 22_000;
+/**
+ * Hard cap on the entire pRetry loop (including wait between retries).
+ * LI.FI can be slow on complex/new-chain routes; 30s gives p-retry room for
+ * one retry after a fast transient failure without blocking the batch too long.
+ */
+const AGGREGATOR_TIMEOUT_MS = 30_000;
+
+/**
+ * p-retry config — applied to every aggregator call.
+ * 429s are NOT retried inline (AbortError is thrown so the rate limiter can
+ * handle the cooldown and the next cycle will be slower). Transient network
+ * errors and 5xx responses retry twice with jitter.
+ */
+const RETRY_OPTIONS = {
+  retries: 2,
+  minTimeout: 500,
+  maxTimeout: 4_000,
+  factor: 2,
+  randomize: true,
+} as const;
 
 // Rubic is queried only for routes that other aggregators can't handle:
 //  - abstract, hyperliquid, berachain (LI.FI can be slow; Rubic adds coverage)
-// Solana: LI.FI supports via lifiChainId 1151111081099710.
 const RUBIC_FALLBACK_CHAINS = new Set<string>([
   'hyperliquid',
   'berachain',
@@ -67,17 +86,18 @@ export async function fetchAllAggregators(
   const baseLog = parentLog ?? rootLogger;
 
   const allIds = Object.keys(aggregatorRegistry) as AggregatorId[];
-  // Filter to requested subset (if any), then apply per-aggregator eligibility rules
   const ids = allIds.filter((id) => {
     if (subset && !subset.includes(id)) return false;
     if (id === 'rubic') return shouldUseRubic(route);
     return true;
   });
+
   const results = await Promise.allSettled(
     ids.map(async (id) => {
       const log = baseLog.child({ aggregator: id });
       const limiter = getAggregatorLimiter(id);
 
+      // Circuit breaker: skip aggregator if too many consecutive hard failures.
       if (limiter.isOpen()) {
         if (!circuitBreakLogged.has(id)) {
           log.warn(`${id} circuit breaker OPEN — skipping for cooldown`);
@@ -103,21 +123,40 @@ export async function fetchAllAggregators(
         return [];
       }
 
-      await limiter.acquire();
-      if (limiter.isOpen()) return [];
-
       const startMs = Date.now();
+
       try {
+        // schedule() queues this call through the AdaptiveLimiter (Bottleneck).
+        // pRetry retries on transient errors (network, 5xx) with jitter backoff.
+        // 429 (RateLimitError) aborts retrying and triggers permanent rate reduction.
         const result = await withTimeout(
-          aggregatorRegistry[id](route),
+          pRetry(
+            () => limiter.schedule(() => aggregatorRegistry[id](route)),
+            {
+              ...RETRY_OPTIONS,
+              onFailedAttempt: ({ error, attemptNumber, retriesLeft }) => {
+                if (error instanceof RateLimitError) {
+                  limiter.on429(error.retryAfterMs);
+                  // AbortError stops p-retry — don't retry 429s inline.
+                  throw new AbortError(error.message);
+                }
+                // Transient errors: let p-retry handle the backoff.
+                log.debug(
+                  { attempt: attemptNumber, retriesLeft, err: error.message.slice(0, 80) },
+                  `${id}: attempt ${attemptNumber} failed, ${retriesLeft} retries left`
+                );
+              },
+            }
+          ),
           AGGREGATOR_TIMEOUT_MS
         );
+
         const responseMs = Date.now() - startMs;
         limiter.recordSuccess();
+
         const bridgesFound = result.map((q) => q.bridge);
         for (const q of result) bridgesSeen.add(q.bridge);
 
-        // Adaptive skip tracking: hit resets miss counter; silent empty counts as miss.
         if (result.length > 0) {
           recordHit(id, route);
         } else {
@@ -134,33 +173,45 @@ export async function fetchAllAggregators(
         }).catch(() => {});
 
         return result;
+
       } catch (err) {
         const responseMs = Date.now() - startMs;
-        const isTimeout = err instanceof Error && err.message === 'timeout';
+        const isRateLimit = err instanceof RateLimitError ||
+          (err instanceof AbortError && err.message.toLowerCase().includes('rate limit'));
         const errorMessage = err instanceof Error ? err.message : String(err);
         const lower = errorMessage.toLowerCase();
+        const isTimeout = err instanceof Error && err.message === 'timeout';
         const isHttp400 = lower.includes('http 400') || lower.includes('http 404');
-        const isHttp429 = lower.includes('http 429');
         const isNoRoute =
           !isTimeout &&
+          !isRateLimit &&
           (isHttp400 ||
             lower.includes('none of the available routes') ||
             lower.includes('no route') ||
             lower.includes('operation was aborted'));
-        const status = isTimeout ? 'timeout' : isHttp429 ? 'skipped' : isNoRoute ? 'no_route' : 'error';
-        // 400/404 = no route, 429 = rate limit — neither means the aggregator is down.
-        // Only real errors and timeouts count toward circuit breaker.
-        if (!isNoRoute && !isHttp429) {
+
+        const status = isTimeout
+          ? 'timeout'
+          : isRateLimit
+            ? 'rate_limited'
+            : isNoRoute
+              ? 'no_route'
+              : 'error';
+
+        // Only real errors advance the circuit breaker — not 429s or no-routes.
+        if (!isNoRoute && !isRateLimit) {
           limiter.recordFailure();
         }
 
-        // Adaptive skip tracking: explicit no_route errors count as a miss.
-        // Timeouts and transient errors do NOT — those are infrastructure issues.
+        // Adaptive skip: explicit no-route errors count as a miss.
         if (isNoRoute) {
           recordMiss(id, route);
         }
 
-        log.warn({ responseMs, status, error: errorMessage.slice(0, 120) }, `${id}: ${isTimeout ? 'timeout' : errorMessage.slice(0, 60)}`);
+        log.warn(
+          { responseMs, status, error: errorMessage.slice(0, 120) },
+          `${id}: ${isTimeout ? 'timeout' : errorMessage.slice(0, 60)}`
+        );
 
         await insertFetchLog({
           batchId, ts: new Date(), srcChain: route.src, dstChain: route.dst,

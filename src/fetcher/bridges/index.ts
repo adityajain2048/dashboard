@@ -1,6 +1,10 @@
+import pRetry, { AbortError } from 'p-retry';
 import type { NormalizedQuote, RouteKey } from '../../types/index.js';
 import { V1_DIRECT_BRIDGES } from '../../config/bridges.js';
 import { logger } from '../../lib/logger.js';
+import { getBridgeLimiter } from '../../lib/rate-limiter.js';
+import { RateLimitError } from '../../lib/errors.js';
+import { withTimeout } from '../../lib/utils.js';
 import { fetchAcross } from './across.js';
 import { fetchRelay } from './relay.js';
 import { fetchMayan } from './mayan.js';
@@ -36,6 +40,17 @@ registerBridge('stargate', fetchStargate);
 registerBridge('orbiter', fetchOrbiter);
 registerBridge('everclear', fetchEverclear);
 
+/** Hard cap per bridge call including p-retry attempts. */
+const BRIDGE_TIMEOUT_MS = 15_000;
+
+const BRIDGE_RETRY_OPTIONS = {
+  retries: 1,          // One retry for transient errors (bridges are gap-fill, not time-critical)
+  minTimeout: 1_000,
+  maxTimeout: 5_000,
+  factor: 2,
+  randomize: true,
+} as const;
+
 export async function gapFill(
   routeKey: RouteKey,
   bridgesSeen: Set<string>,
@@ -52,10 +67,36 @@ export async function gapFill(
 
   const results = await Promise.allSettled(
     missing.map(async (bridge) => {
+      const limiter = getBridgeLimiter(bridge.id);
+
+      if (limiter.isOpen()) return [];
+
       try {
-        return await bridgeRegistry[bridge.id]!(routeKey);
+        const result = await withTimeout(
+          pRetry(
+            () => limiter.schedule(() => bridgeRegistry[bridge.id]!(routeKey)),
+            {
+              ...BRIDGE_RETRY_OPTIONS,
+              onFailedAttempt: ({ error }) => {
+                if (error instanceof RateLimitError) {
+                  limiter.on429(error.retryAfterMs);
+                  throw new AbortError(error.message);
+                }
+                limiter.recordFailure();
+              },
+            }
+          ),
+          BRIDGE_TIMEOUT_MS
+        );
+
+        limiter.recordSuccess();
+        return result;
       } catch (err) {
-        logger.warn({ bridge: bridge.id, error: err }, 'Gap-fill bridge failed');
+        const isRateLimit = err instanceof RateLimitError ||
+          (err instanceof AbortError && err.message.toLowerCase().includes('rate limit'));
+        if (!isRateLimit) {
+          logger.debug({ bridge: bridge.id, error: err }, 'Gap-fill bridge failed');
+        }
         return [];
       }
     })

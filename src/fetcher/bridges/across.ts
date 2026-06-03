@@ -4,6 +4,7 @@ import { getChain } from '../../config/chains.js';
 import { getFromAmountBase, outputAmountToUsd } from '../../lib/amounts.js';
 import { logger } from '../../lib/logger.js';
 import { fetchWithTimeout } from '../../lib/utils.js';
+import { RateLimitError } from '../../lib/errors.js';
 
 export async function fetchAcross(route: RouteKey): Promise<NormalizedQuote[]> {
   try {
@@ -26,6 +27,7 @@ export async function fetchAcross(route: RouteKey): Promise<NormalizedQuote[]> {
     url.searchParams.set('skipAmountLimit', 'true');
 
     const res = await fetchWithTimeout(url, {}, 10_000);
+    if (res.status === 429) throw new RateLimitError(Math.max(parseInt(res.headers.get('retry-after') ?? '0', 10) * 1000, 60_000));
     if (!res.ok) return [];
 
     const data = (await res.json()) as { totalRelayFee?: { total?: string; pct?: string }; estimatedFillTimeSec?: number };
@@ -62,6 +64,7 @@ export async function fetchAcross(route: RouteKey): Promise<NormalizedQuote[]> {
     };
     return [quote];
   } catch (e) {
+    if (e instanceof RateLimitError) throw e;
     logger.debug({ route, error: e }, 'Across fetch failed');
     return [];
   }

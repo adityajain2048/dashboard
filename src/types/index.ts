@@ -164,7 +164,7 @@ export interface FetchLogEntry {
   readonly amountTier: number;
   readonly source: string;
   readonly bridge: string | null;
-  readonly status: 'success' | 'error' | 'timeout' | 'no_route' | 'skipped';
+  readonly status: 'success' | 'error' | 'timeout' | 'no_route' | 'skipped' | 'rate_limited';
   readonly responseMs: number;
   readonly errorMessage: string | null;
   readonly quoteCount: number;

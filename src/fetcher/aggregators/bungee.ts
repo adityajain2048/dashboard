@@ -6,6 +6,7 @@ import { resolveBridgeName } from '../../config/bridges.js';
 import { getFromAmountBase, outputAmountToUsd } from '../../lib/amounts.js';
 import { logger } from '../../lib/logger.js';
 import { fetchWithTimeout } from '../../lib/utils.js';
+import { RateLimitError } from '../../lib/errors.js';
 
 const BUNGEE_UNSUPPORTED = new Set<string>([
   'solana',
@@ -58,6 +59,10 @@ export async function fetchBungee(route: RouteKey): Promise<NormalizedQuote[]> {
   }, 10_000);
 
   if (!res.ok) {
+    if (res.status === 429) {
+      const retryAfterMs = Math.max(parseInt(res.headers.get('retry-after') ?? '0', 10) * 1000, 60_000);
+      throw new RateLimitError(retryAfterMs, 'bungee');
+    }
     const errBody = await res.text().catch(() => '');
     throw new Error(`HTTP ${res.status}: ${errBody.slice(0, 100)}`);
   }

@@ -3,6 +3,7 @@ import { getToken, isPlaceholder } from '../../config/tokens.js';
 import { getFromAmountBase } from '../../lib/amounts.js';
 import { logger } from '../../lib/logger.js';
 import { fetchWithTimeout } from '../../lib/utils.js';
+import { RateLimitError } from '../../lib/errors.js';
 
 /** THORChain asset notation: CHAIN.SYMBOL */
 const THOR_ASSET: Record<string, Record<string, string>> = {
@@ -33,6 +34,7 @@ export async function fetchThorchain(route: RouteKey): Promise<NormalizedQuote[]
     url.searchParams.set('amount', thorAmount);
 
     const res = await fetchWithTimeout(url, {}, 10_000);
+    if (res.status === 429) throw new RateLimitError(Math.max(parseInt(res.headers.get('retry-after') ?? '0', 10) * 1000, 60_000));
     if (!res.ok) return [];
 
     const data = (await res.json()) as {
@@ -80,6 +82,7 @@ export async function fetchThorchain(route: RouteKey): Promise<NormalizedQuote[]
     };
     return [quote];
   } catch (e) {
+    if (e instanceof RateLimitError) throw e;
     logger.debug({ route, error: e }, 'THORChain fetch failed');
     return [];
   }

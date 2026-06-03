@@ -4,6 +4,7 @@ import { getChain } from '../../config/chains.js';
 import { getFromAmountBase } from '../../lib/amounts.js';
 import { logger } from '../../lib/logger.js';
 import { fetchWithTimeout } from '../../lib/utils.js';
+import { RateLimitError } from '../../lib/errors.js';
 
 /** Stargate V2 uses LayerZero Endpoint IDs (not EVM chainIds) */
 const STARGATE_EID: Record<string, number> = {
@@ -85,6 +86,7 @@ export async function fetchStargate(route: RouteKey): Promise<NormalizedQuote[]>
     url.searchParams.set('amount', amountBase);
 
     const res = await fetchWithTimeout(url, {}, 10_000);
+    if (res.status === 429) throw new RateLimitError(Math.max(parseInt(res.headers.get('retry-after') ?? '0', 10) * 1000, 60_000));
     if (!res.ok) return [];
 
     const data = (await res.json()) as {
@@ -124,6 +126,7 @@ export async function fetchStargate(route: RouteKey): Promise<NormalizedQuote[]>
     };
     return [quote];
   } catch (e) {
+    if (e instanceof RateLimitError) throw e;
     logger.debug({ route, error: e }, 'Stargate fetch failed');
     return [];
   }
