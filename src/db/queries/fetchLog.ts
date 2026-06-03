@@ -24,3 +24,81 @@ export async function insertFetchLog(entry: FetchLogEntry): Promise<void> {
     ]
   );
 }
+
+// ─── Aggregator skip tracking ─────────────────────────────────────────────────
+
+export interface AggregatorSkipRow {
+  src_chain: string;
+  dst_chain: string;
+  asset: string;
+  amount_tier: number;
+  aggregator: string;
+  skip_until: Date | null;
+}
+
+/**
+ * Load all active skips (skip_until > NOW()) from the DB.
+ * Called at startup and refreshed every 30 minutes.
+ */
+export async function loadAggregatorSkip(): Promise<AggregatorSkipRow[]> {
+  const result = await query<AggregatorSkipRow>(
+    `SELECT src_chain, dst_chain, asset, amount_tier::float AS amount_tier,
+            aggregator, skip_until
+     FROM aggregator_route_skip
+     WHERE skip_until > NOW()`
+  );
+  return result.rows;
+}
+
+/**
+ * Increment miss_count for a (route, aggregator) pair.
+ * Sets skip_until based on miss_count thresholds:
+ *   ≥ 8 consecutive misses  → skip for 24 hours
+ *   ≥ 20 consecutive misses → skip for 7 days
+ */
+export async function upsertAggregatorMiss(
+  src: string,
+  dst: string,
+  asset: string,
+  amountTier: number,
+  aggregator: string
+): Promise<{ missCount: number; skipUntil: Date | null }> {
+  const result = await query<{ miss_count: number; skip_until: Date | null }>(
+    `INSERT INTO aggregator_route_skip
+       (src_chain, dst_chain, asset, amount_tier, aggregator, miss_count, skip_until, last_miss_at)
+     VALUES ($1, $2, $3, $4, $5, 1, NULL, NOW())
+     ON CONFLICT (src_chain, dst_chain, asset, amount_tier, aggregator)
+     DO UPDATE SET
+       miss_count   = aggregator_route_skip.miss_count + 1,
+       last_miss_at = NOW(),
+       skip_until   = CASE
+         WHEN aggregator_route_skip.miss_count + 1 >= 20 THEN NOW() + INTERVAL '7 days'
+         WHEN aggregator_route_skip.miss_count + 1 >= 8  THEN NOW() + INTERVAL '24 hours'
+         ELSE NULL
+       END
+     RETURNING miss_count, skip_until`,
+    [src, dst, asset, amountTier, aggregator]
+  );
+  const row = result.rows[0];
+  return { missCount: row?.miss_count ?? 1, skipUntil: row?.skip_until ?? null };
+}
+
+/**
+ * Reset miss tracking for a (route, aggregator) pair after a successful quote.
+ * Clears skip_until so the aggregator is probed again on the next cycle.
+ */
+export async function resetAggregatorMiss(
+  src: string,
+  dst: string,
+  asset: string,
+  amountTier: number,
+  aggregator: string
+): Promise<void> {
+  await query(
+    `UPDATE aggregator_route_skip
+     SET miss_count = 0, skip_until = NULL
+     WHERE src_chain = $1 AND dst_chain = $2 AND asset = $3
+       AND amount_tier = $4 AND aggregator = $5`,
+    [src, dst, asset, amountTier, aggregator]
+  );
+}
