@@ -1,6 +1,6 @@
 import format from 'pg-format';
 import type { NormalizedQuote } from '../../types/index.js';
-import { pool, getClient } from '../connection.js';
+import { pool } from '../connection.js';
 
 /** Insert multiple quotes in one batch. Returns number of rows inserted. */
 export async function insertQuotesBatch(quotes: NormalizedQuote[]): Promise<number> {
@@ -43,57 +43,72 @@ export async function insertQuotesBatch(quotes: NormalizedQuote[]): Promise<numb
   return result.rowCount ?? 0;
 }
 
-/** Upsert route_latest: always overwrite with the latest fetch result (no stale guard). */
+/**
+ * Upsert route_latest: always overwrite with the latest fetch result (no stale guard).
+ *
+ * Single bulk INSERT … ON CONFLICT (one round-trip via pool.query) rather than a
+ * held client looping per-row. The old per-row loop held one pool connection for
+ * the entire duration of N sequential inserts; at fetch concurrency 24 that could
+ * pin every connection in the pool and starve the API ("timeout exceeded when
+ * trying to connect"). One bulk statement releases its connection almost immediately.
+ *
+ * Postgres rejects ON CONFLICT touching the same row twice in one statement, so we
+ * dedup by the conflict key first (last write wins) — a single duplicate would
+ * otherwise abort the whole batch and leave route_latest stale.
+ */
 export async function upsertRouteLatest(quotes: NormalizedQuote[]): Promise<void> {
   if (quotes.length === 0) return;
 
-  const client = await getClient();
-  try {
-    for (const q of quotes) {
-      await client.query(
-        `INSERT INTO route_latest (
-          src_chain, dst_chain, asset, amount_tier, bridge, source,
-          ts, batch_id, input_amount, output_amount, output_usd, input_usd, gas_cost_usd,
-          total_fee_bps, total_fee_usd, estimated_seconds,
-          rank_by_output, spread_bps
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
-        ON CONFLICT (src_chain, dst_chain, asset, amount_tier, bridge, source)
-        DO UPDATE SET
-          ts = EXCLUDED.ts,
-          batch_id = EXCLUDED.batch_id,
-          input_amount = EXCLUDED.input_amount,
-          output_amount = EXCLUDED.output_amount,
-          output_usd = EXCLUDED.output_usd,
-          input_usd = EXCLUDED.input_usd,
-          gas_cost_usd = EXCLUDED.gas_cost_usd,
-          total_fee_bps = EXCLUDED.total_fee_bps,
-          total_fee_usd = EXCLUDED.total_fee_usd,
-          estimated_seconds = EXCLUDED.estimated_seconds,
-          rank_by_output = EXCLUDED.rank_by_output,
-          spread_bps = EXCLUDED.spread_bps`,
-        [
-          q.srcChain,
-          q.dstChain,
-          q.asset,
-          q.amountTier,
-          q.bridge,
-          q.source,
-          q.ts,
-          q.batchId,
-          q.inputAmount,
-          q.outputAmount,
-          q.outputUsd,
-          q.inputUsd,
-          q.gasCostUsd,
-          q.totalFeeBps,
-          q.totalFeeUsd,
-          q.estimatedSeconds,
-          q.rank ?? null,
-          q.spreadBps ?? null,
-        ]
-      );
-    }
-  } finally {
-    client.release();
+  // Dedup on the route_latest PK; keep the last occurrence (matches the previous
+  // loop's last-write-wins semantics).
+  const byKey = new Map<string, NormalizedQuote>();
+  for (const q of quotes) {
+    byKey.set(`${q.srcChain}:${q.dstChain}:${q.asset}:${q.amountTier}:${q.bridge}:${q.source}`, q);
   }
+
+  const values = [...byKey.values()].map((q) => [
+    q.srcChain,
+    q.dstChain,
+    q.asset,
+    q.amountTier,
+    q.bridge,
+    q.source,
+    q.ts,
+    q.batchId,
+    q.inputAmount,
+    q.outputAmount,
+    q.outputUsd,
+    q.inputUsd,
+    q.gasCostUsd,
+    q.totalFeeBps,
+    q.totalFeeUsd,
+    q.estimatedSeconds,
+    q.rank ?? null,
+    q.spreadBps ?? null,
+  ]);
+
+  const sql = format(
+    `INSERT INTO route_latest (
+      src_chain, dst_chain, asset, amount_tier, bridge, source,
+      ts, batch_id, input_amount, output_amount, output_usd, input_usd, gas_cost_usd,
+      total_fee_bps, total_fee_usd, estimated_seconds,
+      rank_by_output, spread_bps
+    ) VALUES %L
+    ON CONFLICT (src_chain, dst_chain, asset, amount_tier, bridge, source)
+    DO UPDATE SET
+      ts = EXCLUDED.ts,
+      batch_id = EXCLUDED.batch_id,
+      input_amount = EXCLUDED.input_amount,
+      output_amount = EXCLUDED.output_amount,
+      output_usd = EXCLUDED.output_usd,
+      input_usd = EXCLUDED.input_usd,
+      gas_cost_usd = EXCLUDED.gas_cost_usd,
+      total_fee_bps = EXCLUDED.total_fee_bps,
+      total_fee_usd = EXCLUDED.total_fee_usd,
+      estimated_seconds = EXCLUDED.estimated_seconds,
+      rank_by_output = EXCLUDED.rank_by_output,
+      spread_bps = EXCLUDED.spread_bps`,
+    values
+  );
+  await pool.query(sql);
 }

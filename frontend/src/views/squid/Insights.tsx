@@ -30,26 +30,40 @@ export function Insights({ asset, tier, onOpenRoute }: InsightsProps) {
   const [aggregators, setAggregators] = useState<AggregatorHealth[]>([]);
   const [opps, setOpps] = useState<Opportunity[]>([]);
 
+  // Matrix + opportunities: reload on asset/tier change and refresh every 60s.
+  // On error we keep the last good data (a transient backend hiccup must not blank
+  // the grid) — only the very first load can leave it empty → "Loading…".
   useEffect(() => {
     let cancelled = false;
-    fetchMatrix(asset, tier)
-      .then((r) => { if (!cancelled) setMatrix({ cells: r.cells as MatrixCell[], stats: r.stats }); })
-      .catch(() => { if (!cancelled) setMatrix(null); });
-    fetchOpportunities(asset, tier, 6, 1)
-      .then((r) => { if (!cancelled) setOpps(r.opportunities); })
-      .catch(() => { if (!cancelled) setOpps([]); });
-    return () => { cancelled = true; };
+    const load = (): void => {
+      fetchMatrix(asset, tier)
+        .then((r) => { if (!cancelled) setMatrix({ cells: r.cells as MatrixCell[], stats: r.stats }); })
+        .catch(() => { /* keep last good data */ });
+      fetchOpportunities(asset, tier, 6, 1)
+        .then((r) => { if (!cancelled) setOpps(r.opportunities); })
+        .catch(() => { /* keep last good data */ });
+    };
+    load();
+    const id = setInterval(load, 60_000);
+    return () => { cancelled = true; clearInterval(id); };
   }, [asset, tier]);
 
+  // Bridge coverage + aggregator health: refresh every 60s so a single bad load
+  // (e.g. wins momentarily 0 right after a backend redeploy) never sticks for the
+  // whole session. Keep last good data on error.
   useEffect(() => {
     let cancelled = false;
-    fetchBridgeCoverage()
-      .then((r) => { if (!cancelled) setBridges(r.bridges); })
-      .catch(() => { if (!cancelled) setBridges([]); });
-    fetchBridgeHealth()
-      .then((r) => { if (!cancelled) setAggregators(r.aggregators); })
-      .catch(() => { if (!cancelled) setAggregators([]); });
-    return () => { cancelled = true; };
+    const load = (): void => {
+      fetchBridgeCoverage()
+        .then((r) => { if (!cancelled) setBridges(r.bridges); })
+        .catch(() => { /* keep last good data */ });
+      fetchBridgeHealth()
+        .then((r) => { if (!cancelled) setAggregators(r.aggregators); })
+        .catch(() => { /* keep last good data */ });
+    };
+    load();
+    const id = setInterval(load, 60_000);
+    return () => { cancelled = true; clearInterval(id); };
   }, []);
 
   // ── derive headline KPIs ──
@@ -89,7 +103,7 @@ export function Insights({ asset, tier, onOpenRoute }: InsightsProps) {
             <HeroStat label="Avg best fee" value={fmtPct(kpis.avgFee)} accent="var(--squid-lime)"
               sub="across all live corridors" />
             <HeroStat label="Top aggregator" value={kpis.topAgg ? aggMeta(kpis.topAgg.id).name : '—'} accent="var(--squid-lavender)"
-              sub={kpis.topAgg ? ((kpis.topAgg.wins != null) ? `${kpis.topAgg.wins.toLocaleString()} routes won · ${kpis.topAgg.winPct ?? 0}% share` : `${kpis.topAgg.successRate}% success · ${kpis.topAgg.successCount.toLocaleString()} quotes`) : 'loading…'}
+              sub={kpis.topAgg ? `${(kpis.topAgg.wins ?? 0).toLocaleString()} routes won · ${kpis.topAgg.winPct ?? 0}% share` : 'loading…'}
               dot={kpis.topAgg ? aggMeta(kpis.topAgg.id).color : undefined} />
             <HeroStat label="Top bridge" value={kpis.topBridge ? kpis.topBridge.name : '—'} accent="var(--fg-1)"
               sub={kpis.topBridge ? `${kpis.topBridge.wins.toLocaleString()} route wins` : 'loading…'}
@@ -224,24 +238,16 @@ function BridgeBoard({ rows }: { rows: BridgeCoverageItem[] }) {
   );
 }
 
-/* ─── aggregator performance (route wins, or success rate fallback) ─── */
+/* ─── aggregator performance (always route wins — never success rate) ─── */
 function AggregatorBoard({ rows }: { rows: AggregatorHealth[] }) {
-  // Backend may not have wins data (older deployment). Fall back to successRate.
-  const hasWinsData = rows.some((r) => (r.wins ?? 0) > 0);
-  const maxVal = hasWinsData
-    ? Math.max(...rows.map((r) => r.wins ?? 0), 1)
-    : 100; // successRate is already 0–100
+  const maxVal = Math.max(...rows.map((r) => r.wins ?? 0), 1);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
       {rows.map((r, i) => {
         const color = aggMeta(r.id).color;
         const wins = r.wins ?? 0;
-        const barPct = hasWinsData ? (wins / maxVal) * 100 : r.successRate;
-        const primaryVal = hasWinsData ? wins.toLocaleString() : `${r.successRate}%`;
-        const secondaryVal = hasWinsData
-          ? `${r.winPct ?? 0}%`
-          : (r.avgResponseMs != null ? `${r.avgResponseMs}ms` : '—');
+        const barPct = (wins / maxVal) * 100;
         return (
           <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ width: 14, fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 11, color: i === 0 ? 'var(--squid-lavender)' : 'var(--fg-3)', textAlign: 'right' }}>{i + 1}</span>
@@ -250,22 +256,20 @@ function AggregatorBoard({ rows }: { rows: AggregatorHealth[] }) {
             <div style={{ flex: 1, height: 7, borderRadius: 4, background: 'var(--bg-3)', overflow: 'hidden' }}>
               <div style={{ width: `${barPct}%`, height: '100%', borderRadius: 4, background: i === 0 ? 'var(--squid-lavender)' : color, opacity: i === 0 ? 1 : 0.65 }} />
             </div>
-            <span style={{ width: 36, textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 12, color: 'var(--fg-1)' }}>{primaryVal}</span>
-            <span style={{ width: 38, textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)' }}>{secondaryVal}</span>
+            <span style={{ width: 36, textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 12, color: 'var(--fg-1)' }}>{wins.toLocaleString()}</span>
+            <span style={{ width: 38, textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)' }}>{r.winPct ?? 0}%</span>
           </div>
         );
       })}
       <div style={{ marginTop: 10, padding: '8px 10px', background: 'var(--bg-2)', borderRadius: 'var(--r-xs)', border: '1px solid var(--line)' }}>
         <div className="t-mono-xs" style={{ color: 'var(--fg-3)', marginBottom: 6 }}>WHAT THIS MEASURES</div>
         <div className="t-caption" style={{ color: 'var(--fg-2)', lineHeight: 1.5 }}>
-          {hasWinsData
-            ? 'For each live route, the aggregator that returned the single highest output quote gets credited with a win — regardless of which bridge it used.'
-            : 'Success rate = successful quotes ÷ actionable requests over the last 24 h. Latency = avg response time for successful calls.'}
+          For each live route, the aggregator that returned the single highest output quote gets credited with a win — regardless of which bridge it used.
         </div>
       </div>
       <div className="t-mono-xs" style={{ color: 'var(--fg-4)', marginTop: 2, display: 'flex', justifyContent: 'space-between' }}>
         <span>aggregator</span>
-        <span>{hasWinsData ? 'routes won · share' : 'success rate · latency'}</span>
+        <span>routes won · share</span>
       </div>
     </div>
   );
