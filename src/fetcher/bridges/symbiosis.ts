@@ -82,7 +82,7 @@ export async function fetchSymbiosis(route: RouteKey, _key: string): Promise<Nor
       protocolFeeBps: totalFeeBps,
       totalFeeBps,
       totalFeeUsd: String(Math.max(0, route.amountTier - outputUsd)),
-      estimatedSeconds: data.estimatedTime ?? 300,
+      estimatedSeconds: Math.round(data.estimatedTime ?? 300),
       isMultihop: false,
       steps: 1,
     };

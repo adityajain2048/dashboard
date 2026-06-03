@@ -77,7 +77,7 @@ export async function fetchEverclear(route: RouteKey, _key: string): Promise<Nor
       protocolFeeBps: totalFeeBps,
       totalFeeBps,
       totalFeeUsd: String(Math.max(0, route.amountTier - outputUsd)),
-      estimatedSeconds: data.estimatedTime ?? 1800, // Everclear can be slow (auction-based)
+      estimatedSeconds: Math.round(data.estimatedTime ?? 1800), // Everclear can be slow (auction-based)
       isMultihop: false,
       steps: 1,
     };
