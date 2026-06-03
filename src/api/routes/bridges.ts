@@ -2,6 +2,13 @@ import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
 import { z } from 'zod';
 import { query } from '../../db/connection.js';
 import { normalizeBridge, BRIDGES, BRIDGE_SUPPORTED_CHAINS, getBridgeMaxRoutes } from '../../config/bridges.js';
+import { STALE_THRESHOLD_MS } from '../../db/queries/routes.js';
+
+// Freshness window for "live route" stats (wins / coverage / avg fee). Derived
+// from the matrix staleness threshold so the aggregator board, matrix, and
+// explorer all use the same window (all tiers share one value). A full refresh
+// cycle can exceed 2h, so a tighter window under-counts live routes.
+const FRESH_MINUTES = Math.round(STALE_THRESHOLD_MS[1] / 60_000);
 
 /** Canonical display names for known bridges */
 const BRIDGE_NAMES: Record<string, string> = {
@@ -99,7 +106,7 @@ export default async function bridgesRoutes(
         `SELECT best_bridge AS bridge, COUNT(*) AS wins
          FROM route_status
          WHERE state IN ('active', 'single-bridge') AND best_bridge IS NOT NULL
-           AND last_seen > NOW() - INTERVAL '47 minutes'
+           AND last_seen > NOW() - INTERVAL '${FRESH_MINUTES} minutes'
          GROUP BY best_bridge`
       ),
       query<FeeRow>(
@@ -107,13 +114,13 @@ export default async function bridgesRoutes(
          FROM route_status
          WHERE state IN ('active', 'single-bridge') AND best_bridge IS NOT NULL
            AND best_fee_bps IS NOT NULL AND best_fee_bps >= 0
-           AND last_seen > NOW() - INTERVAL '47 minutes'
+           AND last_seen > NOW() - INTERVAL '${FRESH_MINUTES} minutes'
          GROUP BY best_bridge`
       ),
       query<TotalRow>(
         `SELECT COUNT(*) AS total FROM route_status
          WHERE state IN ('active', 'single-bridge')
-           AND last_seen > NOW() - INTERVAL '47 minutes'`
+           AND last_seen > NOW() - INTERVAL '${FRESH_MINUTES} minutes'`
       ),
     ]);
 
@@ -264,7 +271,7 @@ export default async function bridgesRoutes(
              AND rs.asset       = rl.asset
              AND rs.amount_tier = rl.amount_tier
            WHERE rs.state IN ('active', 'single-bridge')
-             AND rs.last_seen > NOW() - INTERVAL '47 minutes'
+             AND rs.last_seen > NOW() - INTERVAL '${FRESH_MINUTES} minutes'
              AND rl.source IN ('lifi', 'rango', 'bungee', 'rubic', 'squid')
              AND rl.output_usd::numeric > 0.01
              AND (rl.total_fee_bps IS NULL OR rl.total_fee_bps <= 1000)
