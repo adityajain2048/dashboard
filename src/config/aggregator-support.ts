@@ -4,9 +4,9 @@
 // scheduled (see fetchAllAggregators) so we never queue — and never burn a
 // timeout budget on — a (route, aggregator) pair that can't return a quote.
 //
-// This is a static head-start. The adaptive skip map (aggregator-skip.ts) also
-// learns dead pairs dynamically (timeouts now count as misses), so this list
-// only needs the high-confidence cases; tune it as coverage is confirmed.
+// This is the only mechanism that prevents calling known-unsupported pairs
+// (adaptive skip was removed) — so keep it reasonably complete for chains an
+// aggregator genuinely can't serve; tune it as coverage is confirmed.
 import type { AggregatorId, RouteKey } from '../types/index.js';
 import { CHAINS } from './chains.js';
 
