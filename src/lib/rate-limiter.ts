@@ -333,15 +333,19 @@ const AGGREGATOR_CONFIGS: Record<AggregatorId, AdaptiveLimiterConfig> = {
     highWater:         -1,
   },
 
-  // Squid: 720 rpm (12 rps → 83ms). Large queue for cold-start sweep.
+  // Squid: burst-tested at 10 RPS for 30s.
+  // Result: 85.9% ok, 7.4% 429, p50=800ms, retry-after 0.016–0.314s (fractional seconds).
+  // Conservative config: maxConcurrent=10 caps in-flight. At p50 (800ms) that yields
+  // 10/0.8 = 12.5 RPS but minTime=100ms limits launches to 10 RPS. When responses
+  // slow to p90 (1429ms) the cap binds: 10/1.429 ≈ 7 RPS — averaging ~8 RPS sustained.
   squid: {
-    maxConcurrent:     24,
-    initialMinTime:    83,
+    maxConcurrent:     10,    // conservative cap — ~8 RPS effective at avg latency
+    initialMinTime:    100,   // 10 RPS launch rate
     backoffFactor:     1.5,
     maxMinTime:        30_000,
     recoveryFactor:    0.9,
-    minMinTime:        83,
-    recoveryThreshold: 200,
+    minMinTime:        100,   // hold floor at 10 RPS; no adaptive acceleration
+    recoveryThreshold: 50,
     circuitThreshold:  20,
     circuitCooldownMs: 60_000,
     highWater:         -1,

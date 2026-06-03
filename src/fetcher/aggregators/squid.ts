@@ -222,7 +222,9 @@ export async function fetchSquid(route: RouteKey, _key: string): Promise<Normali
     // 429 — throw RateLimitError so the coordinator can reduce the adaptive rate.
     if (res.status === 429) {
       const retryHeader = res.headers.get('retry-after');
-      const retryAfterMs = Math.max(retryHeader ? parseInt(retryHeader, 10) * 1000 : 0, 60_000);
+      // Squid sends fractional seconds (e.g. "0.205") — parseFloat, not parseInt.
+      // Floor at 1 s so we don't hammer immediately; 60 s was far too aggressive.
+      const retryAfterMs = Math.max(retryHeader ? parseFloat(retryHeader) * 1000 : 0, 1_000);
       throw new RateLimitError(retryAfterMs, 'squid');
     }
     // Squid returns 500 for thin-liquidity routes ("Low liquidity") — treat as no-route
