@@ -17,6 +17,7 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } f
 interface QuoteRow {
   source: string;
   bridge: string;
+  ts?: string;
   outputAmount: string;
   outputUsd: string;
   totalFeeBps: number;
@@ -95,18 +96,25 @@ export function RouteExplorer({ asset, tier, route }: RouteExplorerProps) {
 
   const swap = () => { setSrc(dst); setDst(src); };
 
-  const best = quotes[0];
-  const worst = quotes[quotes.length - 1];
-  const aggCount = new Set(quotes.map((q) => q.source)).size;
-
-  const bridgeSourceCount = useMemo(() => {
-    const m = new Map<string, Set<string>>();
-    for (const q of quotes) {
-      if (!m.has(q.bridge)) m.set(q.bridge, new Set());
-      m.get(q.bridge)!.add(q.source);
-    }
-    return m;
+  // The backend returns ALL known quotes for the route; the frontend does the
+  // windowing. The 3-hour view matches what the matrix reports (3h stale
+  // threshold); the 24-hour view surfaces cheaper-but-older routes it ages out.
+  const { quotes3h, quotes24h } = useMemo(() => {
+    const now = Date.now();
+    const cutoff3h = now - 3 * 60 * 60 * 1000;
+    const cutoff24h = now - 24 * 60 * 60 * 1000;
+    const fresh = (cutoff: number) =>
+      quotes.filter((q) => !q.ts || new Date(q.ts).getTime() >= cutoff);
+    return { quotes3h: fresh(cutoff3h), quotes24h: fresh(cutoff24h) };
   }, [quotes]);
+
+  // Header metrics reflect the 3-hour view so the headline "Best fee" matches the matrix.
+  const best = quotes3h[0];
+  const worst = quotes3h[quotes3h.length - 1];
+  const aggCount = new Set(quotes3h.map((q) => q.source)).size;
+  const headerSpreadBps = quotes3h.length > 1 && best && worst
+    ? Math.max(0, Math.round((10000 * (parseFloat(best.outputUsd) - parseFloat(worst.outputUsd))) / parseFloat(best.outputUsd)))
+    : 0;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -132,80 +140,38 @@ export function RouteExplorer({ asset, tier, route }: RouteExplorerProps) {
           </div>
 
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 20, alignItems: 'flex-end' }}>
-            <Metric label="Best fee" value={best ? fmtPct(best.totalFeeBps) : '—'} tone="var(--squid-lime)" />
-            <Metric label="Spread range" value={quotes.length > 1 ? fmtPct(worst?.spreadBps ?? 0) : '—'} tone="var(--fg-2)" />
-            <Metric label="Bridges" value={String(quotes.length)} tone="var(--fg-2)" />
+            <Metric label="Best fee (3h)" value={best ? fmtPct(best.totalFeeBps) : '—'} tone="var(--squid-lime)" />
+            <Metric label="Spread range" value={quotes3h.length > 1 ? fmtPct(headerSpreadBps) : '—'} tone="var(--fg-2)" />
+            <Metric label="Bridges" value={String(quotes3h.length)} tone="var(--fg-2)" />
             <Metric label="Aggregators" value={String(aggCount)} tone="var(--squid-lavender)" />
           </div>
         </div>
       </Card>
 
-      {/* ─── quotes table ─── */}
-      <Card pad={0} style={{ overflow: 'hidden' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: 0, padding: '11px 18px', borderBottom: '1px solid var(--line)', background: 'var(--bg-2)' }}>
-          {['', 'Bridge', 'Best via', 'You receive', 'Fee', 'Time', 'Spread'].map((h, i) => (
-            <span key={i} className="t-mono-xs" style={{ color: 'var(--fg-3)', textAlign: i >= 3 && i <= 4 ? 'right' : i >= 5 ? 'right' : 'left' }}>{h}</span>
-          ))}
-        </div>
-
-        {loading && quotes.length === 0 ? (
-          <Empty label="Fetching quotes from aggregators…" />
-        ) : quotes.length === 0 ? (
-          <Empty label="No quotes available for this corridor right now." />
-        ) : (
-          quotes.map((q, i) => {
-            const totalFee = parseFloat(q.totalFeeUsd);
-            const gas = parseFloat(q.gasCostUsd);
-            const proto = Math.max(totalFee - gas, 0);
-            const gasPct = (gas / (totalFee || 1)) * 100;
-            const srcCount = bridgeSourceCount.get(q.bridge)?.size ?? 1;
-            const spreadColor = (q.spreadBps ?? 0) < 30 ? 'var(--good)' : (q.spreadBps ?? 0) < 100 ? 'var(--warn)' : 'var(--bad)';
-            return (
-              <div key={`${q.bridge}-${q.source}-${i}`} className="sq-row" style={{
-                display: 'grid', gridTemplateColumns: GRID, alignItems: 'center', padding: '13px 18px',
-                borderBottom: i < quotes.length - 1 ? '1px solid var(--bg-2)' : 'none',
-                background: i === 0 ? 'rgba(230,250,54,0.05)' : 'transparent',
-              }}>
-                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 12, color: i === 0 ? 'var(--squid-lime)' : 'var(--fg-3)' }}>{i === 0 ? '★' : i + 1}</span>
-                <div>
-                  <BridgeTag id={q.bridge} />
-                  {srcCount > 1 && <div className="t-mono-xs" style={{ color: 'var(--fg-4)', marginTop: 3, marginLeft: 14 }}>on {srcCount} aggregators</div>}
-                </div>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ width: 7, height: 7, borderRadius: 2, background: aggMeta(q.source).color }} />
-                  <span style={{ fontFamily: 'var(--font-ui)', fontWeight: 500, fontSize: 12, color: 'var(--fg-2)' }}>{aggMeta(q.source).name}</span>
-                </span>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 14, color: i === 0 ? 'var(--squid-lime)' : 'var(--fg-1)' }}>{fmtUsd(parseFloat(q.outputUsd))}</div>
-                  <div className="t-mono-xs" style={{ color: 'var(--fg-4)', marginTop: 2 }}>{formatTokenAmount(q.outputAmount, asset, dst)} {getReceiveSymbol(asset, dst)}</div>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12, color: 'var(--fg-2)' }}>{fmtUsd(totalFee)} <span style={{ color: 'var(--fg-4)', fontSize: 10 }}>{q.totalFeeBps}bps</span></div>
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
-                    <div style={{ width: 60, height: 5, borderRadius: 3, background: 'var(--bg-3)', overflow: 'hidden', display: 'flex' }}>
-                      <div style={{ width: `${gasPct}%`, background: 'var(--fg-4)' }} title={`gas ${fmtUsd(gas)}`} />
-                      <div style={{ width: `${100 - gasPct}%`, background: 'var(--warn)' }} title={`protocol ${fmtUsd(proto)}`} />
-                    </div>
-                  </div>
-                </div>
-                <span style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--fg-2)' }}>~{fmtTime(q.estimatedSeconds)}</span>
-                <span style={{ textAlign: 'right' }}>
-                  {i === 0 ? <Pill tone="win">best</Pill> : (
-                    <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12, color: spreadColor }}>−{fmtPct(q.spreadBps)}</span>
-                  )}
-                </span>
-              </div>
-            );
-          })
-        )}
-
-        <div style={{ padding: '10px 18px', background: 'var(--bg-2)', borderTop: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between' }}>
-          <span className="t-mono-xs" style={{ color: 'var(--fg-4)' }}>
-            {quotes.length} bridge{quotes.length !== 1 ? 's' : ''} · {aggCount} aggregator{aggCount !== 1 ? 's' : ''} queried · gap-filled direct
-          </span>
-          <span className="t-mono-xs" style={{ color: 'var(--fg-4)' }}>next refresh {refreshIn}s</span>
-        </div>
-      </Card>
+      {/* ─── two windows: best in the last hour, and best over 24h ─── */}
+      {loading && quotes.length === 0 ? (
+        <Card pad={0} style={{ overflow: 'hidden' }}><Empty label="Fetching quotes from aggregators…" /></Card>
+      ) : quotes.length === 0 ? (
+        <Card pad={0} style={{ overflow: 'hidden' }}><Empty label="No quotes available for this corridor right now." /></Card>
+      ) : (
+        <>
+          <QuoteSection
+            title="Best — last 3 hours"
+            sub="live quotes (matches the matrix)"
+            quotes={quotes3h}
+            asset={asset}
+            dst={dst}
+            refreshIn={refreshIn}
+          />
+          <QuoteSection
+            title="Best — last 24 hours"
+            sub="includes older quotes the 3h view ages out"
+            quotes={quotes24h}
+            asset={asset}
+            dst={dst}
+          />
+        </>
+      )}
 
       {/* ─── history ─── */}
       <Card pad={18}>
@@ -245,6 +211,98 @@ export function RouteExplorer({ asset, tier, route }: RouteExplorerProps) {
         {!showHistory && <div className="t-caption" style={{ padding: '2px 2px' }}>Open the chart to see how each bridge's fee on this corridor has moved.</div>}
       </Card>
     </div>
+  );
+}
+
+/** One ranked quote table for a time window. Spread is recomputed relative to
+ *  THIS window's best so each section is internally consistent. */
+function QuoteSection({ title, sub, quotes, asset, dst, refreshIn }: {
+  title: string;
+  sub: string;
+  quotes: QuoteRow[];
+  asset: string;
+  dst: string;
+  refreshIn?: number;
+}) {
+  const bridgeSourceCount = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    for (const q of quotes) {
+      if (!m.has(q.bridge)) m.set(q.bridge, new Set());
+      m.get(q.bridge)!.add(q.source);
+    }
+    return m;
+  }, [quotes]);
+  const aggCount = new Set(quotes.map((q) => q.source)).size;
+  const bestOut = quotes.length > 0 ? parseFloat(quotes[0]!.outputUsd) : 0;
+
+  return (
+    <Card pad={0} style={{ overflow: 'hidden' }}>
+      <div style={{ padding: '11px 18px', borderBottom: '1px solid var(--line)', background: 'var(--bg-2)', display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+        <span style={{ fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: 13, color: 'var(--fg-1)' }}>{title}</span>
+        <span className="t-mono-xs" style={{ color: 'var(--fg-4)' }}>{sub}</span>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: 0, padding: '11px 18px', borderBottom: '1px solid var(--line)', background: 'var(--bg-2)' }}>
+        {['', 'Bridge', 'Best via', 'You receive', 'Fee', 'Time', 'Spread'].map((h, i) => (
+          <span key={i} className="t-mono-xs" style={{ color: 'var(--fg-3)', textAlign: i >= 3 && i <= 4 ? 'right' : i >= 5 ? 'right' : 'left' }}>{h}</span>
+        ))}
+      </div>
+      {quotes.length === 0 ? (
+        <Empty label="No quotes in this window." />
+      ) : (
+        quotes.map((q, i) => {
+          const totalFee = parseFloat(q.totalFeeUsd);
+          const gas = parseFloat(q.gasCostUsd);
+          const proto = Math.max(totalFee - gas, 0);
+          const gasPct = (gas / (totalFee || 1)) * 100;
+          const srcCount = bridgeSourceCount.get(q.bridge)?.size ?? 1;
+          const out = parseFloat(q.outputUsd);
+          const spreadBps = bestOut > 0 ? Math.max(0, Math.round((10000 * (bestOut - out)) / bestOut)) : 0;
+          const spreadColor = spreadBps < 30 ? 'var(--good)' : spreadBps < 100 ? 'var(--warn)' : 'var(--bad)';
+          return (
+            <div key={`${q.bridge}-${q.source}-${i}`} className="sq-row" style={{
+              display: 'grid', gridTemplateColumns: GRID, alignItems: 'center', padding: '13px 18px',
+              borderBottom: i < quotes.length - 1 ? '1px solid var(--bg-2)' : 'none',
+              background: i === 0 ? 'rgba(230,250,54,0.05)' : 'transparent',
+            }}>
+              <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 12, color: i === 0 ? 'var(--squid-lime)' : 'var(--fg-3)' }}>{i === 0 ? '★' : i + 1}</span>
+              <div>
+                <BridgeTag id={q.bridge} />
+                {srcCount > 1 && <div className="t-mono-xs" style={{ color: 'var(--fg-4)', marginTop: 3, marginLeft: 14 }}>on {srcCount} aggregators</div>}
+              </div>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ width: 7, height: 7, borderRadius: 2, background: aggMeta(q.source).color }} />
+                <span style={{ fontFamily: 'var(--font-ui)', fontWeight: 500, fontSize: 12, color: 'var(--fg-2)' }}>{aggMeta(q.source).name}</span>
+              </span>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 14, color: i === 0 ? 'var(--squid-lime)' : 'var(--fg-1)' }}>{fmtUsd(parseFloat(q.outputUsd))}</div>
+                <div className="t-mono-xs" style={{ color: 'var(--fg-4)', marginTop: 2 }}>{formatTokenAmount(q.outputAmount, asset, dst)} {getReceiveSymbol(asset, dst)}</div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12, color: 'var(--fg-2)' }}>{fmtUsd(totalFee)} <span style={{ color: 'var(--fg-4)', fontSize: 10 }}>{q.totalFeeBps}bps</span></div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
+                  <div style={{ width: 60, height: 5, borderRadius: 3, background: 'var(--bg-3)', overflow: 'hidden', display: 'flex' }}>
+                    <div style={{ width: `${gasPct}%`, background: 'var(--fg-4)' }} title={`gas ${fmtUsd(gas)}`} />
+                    <div style={{ width: `${100 - gasPct}%`, background: 'var(--warn)' }} title={`protocol ${fmtUsd(proto)}`} />
+                  </div>
+                </div>
+              </div>
+              <span style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--fg-2)' }}>~{fmtTime(q.estimatedSeconds)}</span>
+              <span style={{ textAlign: 'right' }}>
+                {i === 0 ? <Pill tone="win">best</Pill> : (
+                  <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12, color: spreadColor }}>−{fmtPct(spreadBps)}</span>
+                )}
+              </span>
+            </div>
+          );
+        })
+      )}
+      <div style={{ padding: '10px 18px', background: 'var(--bg-2)', borderTop: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between' }}>
+        <span className="t-mono-xs" style={{ color: 'var(--fg-4)' }}>
+          {quotes.length} bridge{quotes.length !== 1 ? 's' : ''} · {aggCount} aggregator{aggCount !== 1 ? 's' : ''}
+        </span>
+        {refreshIn != null && <span className="t-mono-xs" style={{ color: 'var(--fg-4)' }}>next refresh {refreshIn}s</span>}
+      </div>
+    </Card>
   );
 }
 
