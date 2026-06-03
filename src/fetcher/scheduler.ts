@@ -37,13 +37,13 @@ const SQUID_ONLY: readonly AggregatorId[] = ['squid'];
 const NON_SQUID: readonly AggregatorId[] = ['lifi', 'rango', 'bungee', 'rubic'];
 
 /**
- * T1 fast subset: LI.FI (400 rpm) + Squid (480 rpm) only.
- * Rango (10 rpm) and Bungee (40 rpm) are too slow to complete a 666-task T1 cycle
- * within the 60s refresh interval — they bottleneck every batch and push solana/Cosmos
- * routes (which appear last in the task list) out of each cycle window.
- * Rango + Bungee data still flows in via T2/T3 cycles (120s/300s) and gap fill (10 min).
+ * T1 aggregators: Squid (720 rpm) + LI.FI (400 rpm, 3 keys) + Bungee (100 rpm).
+ * All three fire concurrently within each route so quotes are always compared side-by-side.
+ * Rango (10 rpm) is too slow for T1 — it continues via T2/T3 cycles.
+ * Bungee is EVM-only so non-EVM routes (Solana, Cosmos) return immediately from Bungee,
+ * keeping the effective Bungee call count at ~19/batch (of 24) → ~11.8s per batch → ~5.3 min total.
  */
-const T1_AGGREGATORS: readonly AggregatorId[] = ['lifi', 'squid'];
+const T1_AGGREGATORS: readonly AggregatorId[] = ['squid', 'lifi', 'bungee'];
 
 // ─── Gap tracking ─────────────────────────────────────────────────────────────
 
@@ -170,63 +170,6 @@ async function runSquidSweep(): Promise<void> {
     { covered, gap, errors, total: tasks.length, elapsed_s: elapsed },
     `Squid sweep complete — ${covered} routes covered, ${gap} gaps identified in ${elapsed}s`
   );
-}
-
-// ─── T1 supplemental cycle (Bungee + Rango) ───────────────────────────────────
-
-/**
- * Supplemental pass over T1 routes using Bungee + Rango — the slow aggregators
- * excluded from the fast T1 cycle. Runs every 5 minutes to keep their data fresh
- * for top corridors (ethereum↔arbitrum, ethereum↔base, etc.) without blocking the
- * fast T1 pass from reaching solana/Cosmos routes.
- */
-const T1_SUPPLEMENTAL_AGGREGATORS: readonly AggregatorId[] = ['bungee', 'rango'];
-const T1_SUPPLEMENTAL_INTERVAL_MS = 5 * 60_000; // 5 minutes
-let t1SupplementalRunning = false;
-
-async function runT1SupplementalCycle(): Promise<void> {
-  if (t1SupplementalRunning) return;
-  t1SupplementalRunning = true;
-  try {
-    const tier1Routes = ALL_ROUTES.filter((r) => r.tier === 1);
-    const batchId = generateBatchId();
-    const log = logger.child({ component: 'scheduler', tier: '1-supplemental', batchId } as Record<string, unknown>);
-
-    const tasks: Array<{ src: string; dst: string; asset: Asset; amountTier: number }> = [];
-    for (const route of tier1Routes) {
-      for (const asset of route.assets) {
-        for (const amountTier of route.amountTiers) {
-          tasks.push({ src: route.src, dst: route.dst, asset, amountTier });
-        }
-      }
-    }
-
-    // Shuffle to avoid same routes being starved each cycle
-    for (let i = tasks.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [tasks[i], tasks[j]] = [tasks[j]!, tasks[i]!];
-    }
-
-    log.info({ tasks: tasks.length }, 'T1 supplemental cycle starting (Bungee + Rango)');
-    const start = Date.now();
-    let filled = 0;
-
-    for (const batch of chunk(tasks, GAP_FILL_CONCURRENCY)) {
-      const results = await Promise.allSettled(
-        batch.map((t) =>
-          processRoute(t.src, t.dst, t.asset, t.amountTier, batchId, log, T1_SUPPLEMENTAL_AGGREGATORS)
-        )
-      );
-      for (const r of results) {
-        if (r.status === 'fulfilled' && r.value > 0) filled++;
-      }
-    }
-
-    const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-    log.info({ tasks: tasks.length, filled, elapsed_s: elapsed }, 'T1 supplemental cycle complete');
-  } finally {
-    t1SupplementalRunning = false;
-  }
 }
 
 // ─── Gap fill ─────────────────────────────────────────────────────────────────
@@ -436,16 +379,6 @@ export function startScheduler(): void {
         runGapFillCycle().catch((e) => logger.error(e, 'Gap fill error'));
       }, GAP_FILL_INTERVAL_MS);
 
-      // T1 supplemental (Bungee + Rango for T1 routes): start after T1 fast cycle settles,
-      // then every 5 minutes. This keeps Bungee/Rango data fresh for top corridors without
-      // blocking the fast LI.FI+Squid T1 cycle from reaching solana/Cosmos routes.
-      setTimeout(() => {
-        runT1SupplementalCycle().catch((e) => logger.error(e, 'T1 supplemental error'));
-      }, 3 * 60_000); // wait 3 min after sweep for T1 fast cycle to complete one pass
-      setInterval(() => {
-        runT1SupplementalCycle().catch((e) => logger.error(e, 'T1 supplemental error'));
-      }, T1_SUPPLEMENTAL_INTERVAL_MS);
-
       // Stagger T1/T2/T3 starts to avoid thundering herd on all APIs at once
       setTimeout(() => {
         runTierCycle(1).catch((e) => logger.error(e, 'Tier 1 cycle error'));
@@ -474,11 +407,9 @@ export function startScheduler(): void {
       setTimeout(() => runTierCycle(1).catch((e2) => logger.error(e2, 'Tier 1 cycle error')), 0);
       setTimeout(() => runTierCycle(2).catch((e2) => logger.error(e2, 'Tier 2 cycle error')), 3 * 60_000);
       setTimeout(() => runTierCycle(3).catch((e2) => logger.error(e2, 'Tier 3 cycle error')), 6 * 60_000);
-      setTimeout(() => runT1SupplementalCycle().catch((e2) => logger.error(e2, 'T1 supplemental error')), 5 * 60_000);
 
       setInterval(() => runTierCycle(1).catch((e2) => logger.error(e2, 'Tier 1 cycle error')), REFRESH_INTERVALS[1]);
       setInterval(() => runTierCycle(2).catch((e2) => logger.error(e2, 'Tier 2 cycle error')), REFRESH_INTERVALS[2]);
       setInterval(() => runTierCycle(3).catch((e2) => logger.error(e2, 'Tier 3 cycle error')), REFRESH_INTERVALS[3]);
-      setInterval(() => runT1SupplementalCycle().catch((e2) => logger.error(e2, 'T1 supplemental error')), T1_SUPPLEMENTAL_INTERVAL_MS);
     });
 }

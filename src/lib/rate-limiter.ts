@@ -87,8 +87,10 @@ const RATE_LIMITS: Record<AggregatorId, { rpm: number; burst: number; circuitThr
   // Rango free tier is very limited (~15-20 req/min per IP). Keep it low to avoid 429 loops.
   // Circuit opens after 8 consecutive failures; unsupported chains are now excluded upstream.
   rango:  { rpm: 10,  burst: 1,  circuitThreshold: 8  },
-  // Bungee: burst=2 prevents 429 floods on startup; 429s excluded from circuit failures anyway.
-  bungee: { rpm: 40,  burst: 2,  circuitThreshold: 15 },
+  // Bungee: raised to 100 rpm so T1 cycle (Squid+LI.FI+Bungee concurrent) fits the 5-min window.
+  // interval=600ms, 24 concurrent tasks → worst-case wait 23×600=13.8s per batch (~5.3 min total).
+  // 429s are excluded from circuit failures; burst=6 for smoother batch starts.
+  bungee: { rpm: 100, burst: 6,  circuitThreshold: 15 },
   rubic:  { rpm: 12,  burst: 1,  circuitThreshold: 10 },
   // Squid: 12 req/sec confirmed safe. rpm=720, burst=12.
   squid:  { rpm: 720, burst: 12, circuitThreshold: 20 },
