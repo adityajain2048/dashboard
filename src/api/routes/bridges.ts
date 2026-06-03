@@ -282,19 +282,26 @@ export default async function bridgesRoutes(
     const winsMap = new Map(winsRes.rows.map(r => [r.source, parseInt(r.wins, 10)]));
     const totalWins = winsRes.rows.reduce((s, r) => s + parseInt(r.wins, 10), 0);
 
-    const aggregators = aggRes.rows.map(r => {
-      const successCount = parseInt(r.success_count, 10);
-      const errorCount = parseInt(r.error_count, 10);
-      const timeoutCount = parseInt(r.timeout_count, 10);
-      const noRouteCount = parseInt(r.no_route_count, 10);
-      const totalCount = parseInt(r.total_count, 10);
-      const actionable = totalCount - noRouteCount;
-      const wins = winsMap.get(r.source) ?? 0;
+    // Always emit all 5 aggregators — an aggregator with no fetch_log rows in the
+    // last 24 h (e.g. Squid during a global rate-limit cooldown) would otherwise
+    // disappear from the response entirely.
+    const ALL_AGGREGATORS = ['lifi', 'rango', 'bungee', 'rubic', 'squid'] as const;
+    const aggRowMap = new Map(aggRes.rows.map(r => [r.source, r]));
+
+    const aggregators = ALL_AGGREGATORS.map(id => {
+      const r = aggRowMap.get(id);
+      const successCount = r ? parseInt(r.success_count, 10) : 0;
+      const errorCount   = r ? parseInt(r.error_count,   10) : 0;
+      const timeoutCount = r ? parseInt(r.timeout_count, 10) : 0;
+      const noRouteCount = r ? parseInt(r.no_route_count, 10) : 0;
+      const totalCount   = r ? parseInt(r.total_count,   10) : 0;
+      const actionable   = totalCount - noRouteCount;
+      const wins         = winsMap.get(id) ?? 0;
       return {
-        id: r.source,
+        id,
         successCount, errorCount, timeoutCount, noRouteCount, totalCount,
-        successRate: actionable > 0 ? Math.round(successCount / actionable * 1000) / 10 : 0,
-        avgResponseMs: r.avg_response_ms ? Math.round(parseFloat(r.avg_response_ms)) : null,
+        successRate:   actionable > 0 ? Math.round(successCount / actionable * 1000) / 10 : 0,
+        avgResponseMs: r?.avg_response_ms ? Math.round(parseFloat(r.avg_response_ms)) : null,
         wins,
         winPct: totalWins > 0 ? Math.round(wins / totalWins * 1000) / 10 : 0,
       };
