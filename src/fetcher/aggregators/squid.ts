@@ -6,7 +6,7 @@ import { getChain } from '../../config/chains.js';
 import { getFromAmountBase } from '../../lib/amounts.js';
 import { logger } from '../../lib/logger.js';
 import { fetchWithTimeout } from '../../lib/utils.js';
-import { RateLimitError } from '../../lib/errors.js';
+import { RateLimitError, NoRouteError } from '../../lib/errors.js';
 import type { Asset } from '../../types/index.js';
 import type { TokenEntry } from '../../types/index.js';
 
@@ -121,6 +121,15 @@ function resolveBridge(provider: string): string {
   return SQUID_BRIDGE_MAP[provider] ?? provider.toLowerCase().replace(/\s+/g, '-');
 }
 
+/** Pull Squid's human-readable `message` out of an error body, else a fallback. */
+function squidErrorReason(body: string, fallback: string): string {
+  try {
+    const j = JSON.parse(body) as { message?: unknown };
+    if (typeof j.message === 'string' && j.message) return j.message.slice(0, 150);
+  } catch { /* not JSON */ }
+  return fallback;
+}
+
 // ─── Zod schemas (typed against @0xsquid/squid-types) ───
 
 const SquidFeeCostSchema = z.object({
@@ -169,17 +178,17 @@ export async function fetchSquid(route: RouteKey, _key: string): Promise<Normali
 
   const srcCat = getSquidCategory(srcChain);
   const dstCat = getSquidCategory(dstChain);
-  if (!srcCat || !dstCat) return [];
+  if (!srcCat || !dstCat) throw new NoRouteError('chain not supported by Squid', 'squid');
 
   // Cosmos ETH = native chain token (OSMO, ATOM, SEI, etc.) — handled via getSquidTokenAddress
   // which returns the IBC denom from tokens.ts (e.g. "uosmo"). Squid bridges via Axelar+swap.
 
   // Sui has no USDC/USDT available via Squid currently — skip
-  if (srcCat === 'sui' || dstCat === 'sui') return [];
+  if (srcCat === 'sui' || dstCat === 'sui') throw new NoRouteError('Sui not supported by Squid', 'squid');
 
   const srcToken = getToken(route.src, route.asset);
   const dstToken = getToken(route.dst, route.asset);
-  if (isPlaceholder(srcToken) || isPlaceholder(dstToken)) return [];
+  if (isPlaceholder(srcToken) || isPlaceholder(dstToken)) throw new NoRouteError('no token mapping for this chain/asset', 'squid');
 
   const fromAmountBase = getFromAmountBase(route.amountTier, route.asset, srcToken.decimals, route.src);
 
@@ -206,17 +215,9 @@ export async function fetchSquid(route: RouteKey, _key: string): Promise<Normali
 
   if (!res.ok) {
     const errBody = await res.text().catch(() => '');
-    // 400/404 = no route for this pair
+    // 400/404 = no route for this pair — surface the reason (e.g. "Low liquidity").
     if (res.status === 400 || res.status === 404) {
-      // Log maintenance/explicit errors at debug level so we can diagnose
-      const lower = errBody.toLowerCase();
-      if (lower.includes('maintenance') || lower.includes('not supported')) {
-        logger.debug(
-          { route, status: res.status, body: errBody.slice(0, 200) },
-          'Squid: chain/route not supported or under maintenance'
-        );
-      }
-      return [];
+      throw new NoRouteError(squidErrorReason(errBody, `HTTP ${res.status}`), 'squid');
     }
     // 429 — throw RateLimitError so the coordinator can reduce the adaptive rate.
     if (res.status === 429) {
@@ -228,7 +229,7 @@ export async function fetchSquid(route: RouteKey, _key: string): Promise<Normali
     if (res.status === 500) {
       const lower = errBody.toLowerCase();
       if (lower.includes('liquidity') || lower.includes('no route') || lower.includes('insufficient')) {
-        return [];
+        throw new NoRouteError(squidErrorReason(errBody, 'low liquidity'), 'squid');
       }
     }
     throw new Error(`HTTP ${res.status}: ${errBody.slice(0, 120)}`);
