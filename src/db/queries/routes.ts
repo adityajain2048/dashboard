@@ -422,15 +422,28 @@ export async function getSquidGapKeys(allTaskKeys: string[]): Promise<string[]> 
   return allTaskKeys.filter((key) => !squidCovered.has(key));
 }
 
-/** Health check: quote count and oldest quote timestamp. */
-export async function getHealth(): Promise<{ quoteCount: number; oldestQuote: Date | null }> {
-  const result = await query<{ count: string; min_ts: Date | null }>(
-    "SELECT COUNT(*)::text AS count, MIN(ts) AS min_ts FROM quotes WHERE ts > NOW() - INTERVAL '24 hours'"
-  );
-  const row = result.rows[0];
+/** Health check: quote count, oldest quote timestamp, and live aggregator/bridge counts. */
+export async function getHealth(): Promise<{
+  quoteCount: number;
+  oldestQuote: Date | null;
+  aggregatorCount: number;
+  bridgeCount: number;
+}> {
+  const [quoteRes, countRes] = await Promise.all([
+    query<{ count: string; min_ts: Date | null }>(
+      "SELECT COUNT(*)::text AS count, MIN(ts) AS min_ts FROM quotes WHERE ts > NOW() - INTERVAL '24 hours'"
+    ),
+    query<{ agg_count: string; bridge_count: string }>(
+      'SELECT COUNT(DISTINCT source)::text AS agg_count, COUNT(DISTINCT bridge)::text AS bridge_count FROM route_latest'
+    ),
+  ]);
+  const quoteRow = quoteRes.rows[0];
+  const countRow = countRes.rows[0];
   return {
-    quoteCount: row ? parseInt(row.count, 10) : 0,
-    oldestQuote: row?.min_ts ?? null,
+    quoteCount: quoteRow ? parseInt(quoteRow.count, 10) : 0,
+    oldestQuote: quoteRow?.min_ts ?? null,
+    aggregatorCount: countRow ? parseInt(countRow.agg_count, 10) : 0,
+    bridgeCount: countRow ? parseInt(countRow.bridge_count, 10) : 0,
   };
 }
 

@@ -8,11 +8,25 @@ import { Pool } from 'pg';
 // released quickly, so 30 leaves healthy headroom for the API.
 // connectionTimeoutMillis: 10s lets an API request ride out a brief fetch-cycle
 // burst instead of 500-ing with "timeout exceeded when trying to connect".
+// keepAlive: TCP keepalive probes prevent Azure's network layer (or any NAT/LB)
+// from silently dropping idle connections — avoids "Connection terminated" errors
+// on the next request after a quiet period.
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: 30,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10000,
+});
+
+// Log idle client errors so we know when connections drop — pg auto-removes
+// the broken client from the pool, so no action needed here.
+pool.on('error', (err) => {
+  // Use console.error as a fallback — logger isn't importable here without
+  // a circular dep (logger → connection → logger). The structured logger at
+  // the call sites will capture query-level errors; this handles pool-level ones.
+  console.error('[pool] idle client error:', err.message);
 });
 
 /** Shorthand for pool.query */

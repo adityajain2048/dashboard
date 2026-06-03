@@ -94,7 +94,8 @@ export function Insights({ asset, tier, onOpenRoute }: InsightsProps) {
             <h1 className="t-h1" style={{ marginBottom: 6 }}>Who wins every route,<br />across every bridge.</h1>
             <p className="t-body" style={{ maxWidth: 380 }}>
               Real-time best-execution intelligence over {kpis.corridors} live corridors,
-              {' '}17 bridges and 4 aggregators.
+              {' '}{kpis.bridgeBoard.length > 0 ? kpis.bridgeBoard.length : '…'} bridges
+              {' '}and {kpis.aggBoard.length > 0 ? kpis.aggBoard.length : '…'} aggregators.
             </p>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(140px, 1fr))', gap: 12, flex: '1 1 360px' }}>

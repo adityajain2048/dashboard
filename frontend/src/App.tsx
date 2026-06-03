@@ -28,7 +28,13 @@ const NAV: Array<{ k: View; l: string; icon: string }> = [
 interface HealthData {
   status: string;
   uptime: number;
-  db: { connected: boolean; quoteCount: number; oldestQuote: string | null };
+  db: {
+    connected: boolean;
+    quoteCount: number;
+    oldestQuote: string | null;
+    aggregatorCount: number;
+    bridgeCount: number;
+  };
 }
 
 function App() {
@@ -105,7 +111,7 @@ function App() {
               <span className="t-mono-xs" style={{ color: statusColor }}>{live ? 'all systems live' : (health?.status ?? 'connecting…')}</span>
             </div>
             <div className="t-caption" style={{ fontSize: 11, lineHeight: 1.5 }}>
-              4 aggregators · 17 bridges · {HEATMAP_ORDER.length} chains
+              {health?.db.aggregatorCount ?? '—'} aggregators · {health?.db.bridgeCount ?? '—'} bridges · {HEATMAP_ORDER.length} chains
               {health ? ` · ${health.db.quoteCount.toLocaleString()} live quotes` : ''}.
             </div>
           </div>

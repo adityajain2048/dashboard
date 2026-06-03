@@ -19,7 +19,9 @@ export default async function healthRoutes(
       // ignore
     }
 
-    const { quoteCount, oldestQuote } = dbConnected ? await getHealth() : { quoteCount: 0, oldestQuote: null as Date | null };
+    const { quoteCount, oldestQuote, aggregatorCount, bridgeCount } = dbConnected
+      ? await getHealth()
+      : { quoteCount: 0, oldestQuote: null as Date | null, aggregatorCount: 0, bridgeCount: 0 };
     const rows = dbConnected ? await getRouteLatestMaxTs() : [];
     let tier1: Date | null = null;
     let tier2: Date | null = null;
@@ -38,6 +40,7 @@ export default async function healthRoutes(
     }
 
     const uptime = Math.floor((Date.now() - startTime) / 1000);
+    reply.header('Cache-Control', 'no-cache, no-store, must-revalidate');
     return reply.send({
       status,
       uptime,
@@ -50,6 +53,8 @@ export default async function healthRoutes(
         connected: dbConnected,
         quoteCount,
         oldestQuote: oldestQuote?.toISOString() ?? null,
+        aggregatorCount,
+        bridgeCount,
       },
     });
   });

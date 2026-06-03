@@ -39,9 +39,15 @@ export async function fetchMatrix(
 export async function fetchHealth(): Promise<{
   status: string;
   uptime: number;
-  db: { connected: boolean; quoteCount: number; oldestQuote: string | null };
+  db: {
+    connected: boolean;
+    quoteCount: number;
+    oldestQuote: string | null;
+    aggregatorCount: number;
+    bridgeCount: number;
+  };
 }> {
-  const res = await fetch(`${BASE}/api/health`);
+  const res = await fetch(`${BASE}/api/health`, { cache: 'no-store' });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
