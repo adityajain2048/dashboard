@@ -5,6 +5,7 @@ import { generateBatchId, chunk } from '../lib/utils.js';
 import { logger } from '../lib/logger.js';
 import { refreshNativePrices } from '../lib/prices.js';
 import { getGapCoverage, hasRecentQuotes, hasRecentSquidQuotes, getSquidGapKeys } from '../db/queries.js';
+import { loadSkipMap } from '../lib/aggregator-skip.js';
 
 // ─── Concurrency constants ────────────────────────────────────────────────────
 
@@ -330,18 +331,29 @@ const SKIP_SWEEP_IF_FRESH_MS = 30 * 60_000;
 export function startScheduler(): void {
   logger.info({ component: 'scheduler' }, 'Scheduler starting — Squid sweep first, then periodic refresh');
 
+  // Refresh skip map every 30 minutes to pick up new skip entries from completed cycles.
+  setInterval(() => {
+    loadSkipMap().catch((e) => logger.warn(e, 'Skip map refresh failed'));
+  }, 30 * 60_000);
+
+  // Load adaptive skip map from DB before any API calls.
+  const skipMapReady = loadSkipMap()
+    .catch((e) => logger.warn(e, 'Failed to load skip map — continuing without'));
+
   // ── Pre-sweep cycles: start lifi/bungee/rango/rubic immediately ──────────────
   // Don't wait for the Squid sweep — it takes up to ~2.5h on a cold DB and blocks
   // nothing that lifi/bungee/rango actually need. Use non-Squid aggregators only so
   // these cycles don't contest Squid's 720 rpm rate-limit budget with the sweep.
   // One-shot immediate runs; the regular intervals (with full Squid) start after sweep.
-  logger.info(
-    { component: 'scheduler' },
-    'Pre-sweep cycles starting — lifi/bungee for T1, all non-Squid for T2/T3'
-  );
-  setTimeout(() => runTierCycle(1, ['lifi', 'bungee']).catch((e) => logger.error(e, 'Pre-sweep T1 error')), 0);
-  setTimeout(() => runTierCycle(2, NON_SQUID).catch((e) => logger.error(e, 'Pre-sweep T2 error')), 60_000);
-  setTimeout(() => runTierCycle(3, NON_SQUID).catch((e) => logger.error(e, 'Pre-sweep T3 error')), 2 * 60_000);
+  skipMapReady.then(() => {
+    logger.info(
+      { component: 'scheduler' },
+      'Pre-sweep cycles starting — lifi/bungee for T1, all non-Squid for T2/T3'
+    );
+    setTimeout(() => runTierCycle(1, ['lifi', 'bungee']).catch((e) => logger.error(e, 'Pre-sweep T1 error')), 0);
+    setTimeout(() => runTierCycle(2, NON_SQUID).catch((e) => logger.error(e, 'Pre-sweep T2 error')), 60_000);
+    setTimeout(() => runTierCycle(3, NON_SQUID).catch((e) => logger.error(e, 'Pre-sweep T3 error')), 2 * 60_000);
+  });
 
   // ── Squid sweep + gap fill ────────────────────────────────────────────────────
   // Skip the sweep only if Squid specifically has recent quotes (within 30 min).
@@ -349,7 +361,8 @@ export function startScheduler(): void {
   // being fresh should NOT suppress the Squid sweep — if Squid's data is stale (e.g.
   // after a rate-limit event), we must re-sweep all routes through Squid regardless of
   // what other aggregators have stored.
-  const sweepPromise = hasRecentSquidQuotes(SKIP_SWEEP_IF_FRESH_MS)
+  const sweepPromise = skipMapReady
+    .then(() => hasRecentSquidQuotes(SKIP_SWEEP_IF_FRESH_MS))
     .then(async (squidFresh) => {
       if (squidFresh) {
         logger.info(

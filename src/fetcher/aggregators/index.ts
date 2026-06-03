@@ -6,6 +6,7 @@ import { getAggregatorLimiter } from '../../lib/rate-limiter.js';
 import { RateLimitError, NoRouteError } from '../../lib/errors.js';
 import { insertFetchLog } from '../../db/queries.js';
 import { withTimeout } from '../../lib/utils.js';
+import { isSkipped, recordMiss, recordHit } from '../../lib/aggregator-skip.js';
 import { aggregatorSupportsRoute } from '../../config/aggregator-support.js';
 import { fetchLifi } from './lifi.js';
 import { fetchRango } from './rango.js';
@@ -109,6 +110,22 @@ export async function fetchAllAggregators(
         return [];
       }
 
+      // Adaptive skip: this aggregator+route pair has returned no quotes
+      // for several consecutive cycles — skip until the cooldown expires.
+      if (isSkipped(id, route)) {
+        log.debug(
+          { src: route.src, dst: route.dst, asset: route.asset, amountTier: route.amountTier },
+          `${id}: adaptive skip (consecutive no-route misses)`
+        );
+        await insertFetchLog({
+          batchId, ts: new Date(), srcChain: route.src, dstChain: route.dst,
+          asset: route.asset, amountTier: route.amountTier, source: id,
+          bridge: null, status: 'skipped', responseMs: 0,
+          errorMessage: 'adaptive skip', quoteCount: 0,
+        }).catch(() => {});
+        return [];
+      }
+
       const startMs = Date.now();
 
       try {
@@ -157,6 +174,7 @@ export async function fetchAllAggregators(
         for (const q of result) bridgesSeen.add(q.bridge);
 
         if (result.length > 0) {
+          recordHit(id, route);
           log.debug({ responseMs, quotes: result.length, bridges: result.map((q) => q.bridge) }, `${id} OK`);
           await insertFetchLog({
             batchId, ts: new Date(), srcChain: route.src, dstChain: route.dst,
@@ -167,6 +185,7 @@ export async function fetchAllAggregators(
         } else {
           // Empty 200 = no route, not a success. Label it accurately. Adapters that
           // know the reason throw NoRouteError (handled below); a bare [] has none.
+          recordMiss(id, route);
           log.debug({ responseMs }, `${id}: no route (empty)`);
           await insertFetchLog({
             batchId, ts: new Date(), srcChain: route.src, dstChain: route.dst,
@@ -212,6 +231,12 @@ export async function fetchAllAggregators(
         // Only real errors advance the circuit breaker — not 429s or no-routes.
         if (!isNoRoute && !isRateLimit) {
           limiter.recordFailure();
+        }
+
+        // #2: adaptive skip — no-route AND real timeouts count as a miss, so a route
+        // that persistently times out self-suppresses after the consecutive threshold.
+        if (isNoRoute || isTimeout) {
+          recordMiss(id, route);
         }
 
         // no_route is expected (unsupported chain / low liquidity) — debug, not warn.
