@@ -15,9 +15,9 @@ import { fetchRubic } from './rubic.js';
 import { fetchSquid } from './squid.js';
 
 /**
- * Hard cap on the entire pRetry loop (including queue wait + retries).
- * LI.FI can be slow on complex/new-chain routes; 30s gives p-retry room for
- * one retry after a fast transient failure without blocking the batch too long.
+ * Network-call timeout — applied inside schedule() to the HTTP request only,
+ * NOT to the queue wait. LI.FI can be slow on complex/new-chain routes, so keep
+ * it generous. A call that hits this is failed (and not retried).
  */
 const AGGREGATOR_TIMEOUT_MS = 30_000;
 
@@ -129,35 +129,43 @@ export async function fetchAllAggregators(
       const startMs = Date.now();
 
       try {
-        // schedule() queues this call through the AdaptiveLimiter (Bottleneck).
-        // pRetry retries on transient errors (network, 5xx) with jitter backoff.
-        // 429 (RateLimitError) aborts retrying and triggers permanent rate reduction.
-        const result = await withTimeout(
-          pRetry(
-            () => limiter.schedule((key) => aggregatorRegistry[id](route, key)),
-            {
-              ...RETRY_OPTIONS,
-              onFailedAttempt: ({ error, attemptNumber, retriesLeft }) => {
-                if (error instanceof RateLimitError) {
-                  // Pass error.key so KeyedAdaptiveLimiter penalises only that key.
-                  limiter.on429(error.retryAfterMs, error.key || undefined);
-                  // AbortError stops p-retry — don't retry 429s inline.
-                  throw new AbortError(error.message);
-                }
-                if (error instanceof NoRouteError) {
-                  // Definitive no-route — don't waste retries. Prefix marks it for
-                  // the catch block; the reason is preserved for fetch_log.
-                  throw new AbortError(`no_route: ${error.reason}`);
-                }
-                // Transient errors: let p-retry handle the backoff.
-                log.debug(
-                  { attempt: attemptNumber, retriesLeft, err: error.message.slice(0, 80) },
-                  `${id}: attempt ${attemptNumber} failed, ${retriesLeft} retries left`
-                );
-              },
+        // The 30s timeout bounds the NETWORK CALL only (it lives inside schedule).
+        // Queue wait is NOT bounded — a job waits as long as the limiter needs
+        // (e.g. during a 429 pause) with no queue-starvation timeout.
+        // pRetry retries transient errors (network, 5xx); a 429 or a call timeout aborts.
+        const result = await pRetry(
+          () => limiter.schedule(async (key) => {
+            try {
+              return await withTimeout(aggregatorRegistry[id](route, key), AGGREGATOR_TIMEOUT_MS);
+            } catch (callErr) {
+              // A call that already ran the full 30s won't be saved by an immediate retry.
+              if (callErr instanceof Error && callErr.message === 'timeout') {
+                throw new AbortError('timeout');
+              }
+              throw callErr;
             }
-          ),
-          AGGREGATOR_TIMEOUT_MS
+          }),
+          {
+            ...RETRY_OPTIONS,
+            onFailedAttempt: ({ error, attemptNumber, retriesLeft }) => {
+              if (error instanceof RateLimitError) {
+                // Pass error.key so KeyedAdaptiveLimiter penalises only that key.
+                limiter.on429(error.retryAfterMs, error.key || undefined);
+                // AbortError stops p-retry — don't retry 429s inline.
+                throw new AbortError(error.message);
+              }
+              if (error instanceof NoRouteError) {
+                // Definitive no-route — don't waste retries. Prefix marks it for
+                // the catch block; the reason is preserved for fetch_log.
+                throw new AbortError(`no_route: ${error.reason}`);
+              }
+              // Transient errors: let p-retry handle the backoff.
+              log.debug(
+                { attempt: attemptNumber, retriesLeft, err: error.message.slice(0, 80) },
+                `${id}: attempt ${attemptNumber} failed, ${retriesLeft} retries left`
+              );
+            },
+          }
         );
 
         const responseMs = Date.now() - startMs;
