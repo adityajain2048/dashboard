@@ -79,10 +79,10 @@ export default async function matrixRoutes(
       });
     }
 
-    // ── Fallback: for routes with no data at requested tier, use any tier ──
-    // Identifies dead-for-this-tier routes and fetches the most recent row
-    // from route_latest regardless of amount_tier, so the matrix always shows
-    // the last quote we ever saw rather than a blank.
+    // ── Fallback: for routes with no data at the requested tier, use the BEST
+    // quote from the OTHER tiers (lowest fee bps), not just the most recent, so
+    // the matrix shows the best available rather than a blank. Selected-tier data
+    // is always preferred — this only fills corridors with nothing at this tier.
     const deadKeys: string[] = [];
     for (const src of HEATMAP_ORDER) {
       for (const dst of HEATMAP_ORDER) {
@@ -104,7 +104,10 @@ export default async function matrixRoutes(
          FROM route_latest
          WHERE asset = $1
            AND concat(src_chain, ':', dst_chain) = ANY($2::text[])
-         ORDER BY src_chain, dst_chain, ts DESC`,
+           AND output_usd::numeric > 0.01
+           AND (total_fee_bps IS NULL OR total_fee_bps <= 1000)
+         -- best (lowest-fee) quote from the other tiers, recency as tiebreaker
+         ORDER BY src_chain, dst_chain, total_fee_bps ASC NULLS LAST, ts DESC`,
         [asset, deadKeys]
       );
       for (const row of fallbackResult.rows) {
