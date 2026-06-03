@@ -2,15 +2,31 @@
 import type { QueryResultRow } from 'pg';
 import { Pool } from 'pg';
 
-// pg-connection-string ≥2.7 treats sslmode=require as sslmode=verify-full
-// (full cert + hostname verification), which causes "Connection terminated
-// unexpectedly" against Azure PostgreSQL Flexible Server's non-public CA.
-// The module's own migration guide says to append uselibpqcompat=true to
-// restore standard libpq semantics (sslmode=require = encrypt, no cert check).
-// We also keep ssl: { rejectUnauthorized: false } as belt-and-suspenders.
+// Parse DATABASE_URL manually to avoid pg-connection-string's SSL handling.
+// pg-connection-string ≥2.7 treats sslmode=require as sslmode=verify-full, then
+// uselibpqcompat=true changes the TLS startup order in a way that confuses
+// Azure PostgreSQL Flexible Server's connection proxy — the server resets the
+// TCP connection before the SSL handshake completes.
+// By passing host/port/user/password/database individually, we bypass
+// pg-connection-string entirely and control SSL ourselves.
 const rawUrl = process.env.DATABASE_URL ?? '';
-const connectionString =
-  rawUrl + (rawUrl.includes('?') ? '&' : '?') + 'uselibpqcompat=true';
+let pgConfig: {
+  host: string; port: number; database: string; user: string; password: string;
+};
+try {
+  const url = new URL(rawUrl);
+  pgConfig = {
+    host: url.hostname,
+    port: parseInt(url.port || '5432', 10),
+    database: url.pathname.replace(/^\//, ''),
+    user: decodeURIComponent(url.username),
+    password: decodeURIComponent(url.password),
+  };
+} catch {
+  // Fallback: pass the raw string and let pg handle it
+  pgConfig = { host: 'localhost', port: 5432, database: '', user: '', password: '' };
+  console.error('[pool] Could not parse DATABASE_URL — check env var');
+}
 
 // max: must comfortably exceed the fetcher's peak concurrency (SWEEP/T1 = 24)
 // so API requests never starve while a fetch cycle holds connections. With the
@@ -21,8 +37,10 @@ const connectionString =
 // keepAlive: TCP keepalive probes prevent Azure's network layer (or any NAT/LB)
 // from silently dropping idle connections — avoids "Connection terminated" errors
 // on the next request after a quiet period.
+// ssl.rejectUnauthorized=false: Azure PostgreSQL Flexible Server requires SSL
+// encryption but uses a non-public CA — encrypt but skip cert verification.
 const pool = new Pool({
-  connectionString,
+  ...pgConfig,
   max: 30,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
