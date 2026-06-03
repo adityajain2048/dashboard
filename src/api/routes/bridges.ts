@@ -45,7 +45,9 @@ interface TotalRow { total: string }
 interface TierWinRow { amount_tier: number; best_bridge: string; wins: string }
 interface AggHealthRow {
   source: string; success_count: string; error_count: string;
-  timeout_count: string; no_route_count: string; total_count: string;
+  timeout_count: string; no_route_count: string; skipped_count: string;
+  /** Actual API calls made — excludes adaptive-skip entries */
+  total_count: string;
   avg_response_ms: string | null;
 }
 interface AggWinsRow { source: string; wins: string; }
@@ -222,14 +224,17 @@ export default async function bridgesRoutes(
   // ─── GET /bridges/health ───
   app.get('/bridges/health', async (_req, reply) => {
     const [aggRes, livenessRes, winsRes] = await Promise.all([
-      // Only the 5 real aggregators — exclude 'direct' (gap-fill bridge calls)
+      // Only the 5 real aggregators — exclude 'direct' (gap-fill bridge calls).
+      // total_count excludes 'skipped' rows (adaptive-skip entries are intentional
+      // non-calls, not failures) so the success-rate denominator stays accurate.
       query<AggHealthRow>(
         `SELECT source,
-           COUNT(*) FILTER (WHERE status = 'success') AS success_count,
-           COUNT(*) FILTER (WHERE status = 'error') AS error_count,
-           COUNT(*) FILTER (WHERE status = 'timeout') AS timeout_count,
+           COUNT(*) FILTER (WHERE status = 'success')  AS success_count,
+           COUNT(*) FILTER (WHERE status = 'error')    AS error_count,
+           COUNT(*) FILTER (WHERE status = 'timeout')  AS timeout_count,
            COUNT(*) FILTER (WHERE status = 'no_route') AS no_route_count,
-           COUNT(*) AS total_count,
+           COUNT(*) FILTER (WHERE status = 'skipped')  AS skipped_count,
+           COUNT(*) FILTER (WHERE status != 'skipped') AS total_count,
            AVG(response_ms) FILTER (WHERE status = 'success') AS avg_response_ms
          FROM fetch_log
          WHERE ts > NOW() - INTERVAL '24 hours'
@@ -294,12 +299,15 @@ export default async function bridgesRoutes(
       const errorCount   = r ? parseInt(r.error_count,   10) : 0;
       const timeoutCount = r ? parseInt(r.timeout_count, 10) : 0;
       const noRouteCount = r ? parseInt(r.no_route_count, 10) : 0;
+      const skippedCount = r ? parseInt(r.skipped_count,  10) : 0;
+      // total_count already excludes skipped rows — see query comment above
       const totalCount   = r ? parseInt(r.total_count,   10) : 0;
+      // actionable = actual API calls that could succeed (no_route excluded)
       const actionable   = totalCount - noRouteCount;
       const wins         = winsMap.get(id) ?? 0;
       return {
         id,
-        successCount, errorCount, timeoutCount, noRouteCount, totalCount,
+        successCount, errorCount, timeoutCount, noRouteCount, skippedCount, totalCount,
         successRate:   actionable > 0 ? Math.round(successCount / actionable * 1000) / 10 : 0,
         avgResponseMs: r?.avg_response_ms ? Math.round(parseFloat(r.avg_response_ms)) : null,
         wins,
