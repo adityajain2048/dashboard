@@ -2,6 +2,16 @@ import format from 'pg-format';
 import type { NormalizedQuote } from '../../types/index.js';
 import { pool } from '../connection.js';
 
+/**
+ * Coerce a possibly-fractional numeric to a Postgres integer. Aggregator APIs
+ * sometimes return fractional values for integer-typed fields (e.g. Squid's
+ * estimatedRouteDuration = 3.5s); inserting those raw fails the ENTIRE batch
+ * with "invalid input syntax for type integer". Null/undefined passes through.
+ */
+function toInt(v: number | null | undefined): number | null {
+  return v == null ? null : Math.round(Number(v));
+}
+
 /** Insert multiple quotes in one batch. Returns number of rows inserted. */
 export async function insertQuotesBatch(quotes: NormalizedQuote[]): Promise<number> {
   if (quotes.length === 0) return 0;
@@ -20,14 +30,14 @@ export async function insertQuotesBatch(quotes: NormalizedQuote[]): Promise<numb
     q.inputUsd,
     q.outputUsd,
     q.gasCostUsd,
-    q.protocolFeeBps,
-    q.totalFeeBps,
+    toInt(q.protocolFeeBps),
+    toInt(q.totalFeeBps),
     q.totalFeeUsd,
-    q.estimatedSeconds,
+    toInt(q.estimatedSeconds),
     q.isMultihop,
-    q.steps,
-    q.rank ?? null,
-    q.spreadBps ?? null,
+    toInt(q.steps),
+    toInt(q.rank),
+    toInt(q.spreadBps),
   ]);
 
   const sql = format(
@@ -80,11 +90,11 @@ export async function upsertRouteLatest(quotes: NormalizedQuote[]): Promise<void
     q.outputUsd,
     q.inputUsd,
     q.gasCostUsd,
-    q.totalFeeBps,
+    toInt(q.totalFeeBps),
     q.totalFeeUsd,
-    q.estimatedSeconds,
-    q.rank ?? null,
-    q.spreadBps ?? null,
+    toInt(q.estimatedSeconds),
+    toInt(q.rank),
+    toInt(q.spreadBps),
   ]);
 
   const sql = format(

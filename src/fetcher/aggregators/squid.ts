@@ -290,7 +290,7 @@ export async function fetchSquid(route: RouteKey, _key: string): Promise<Normali
     protocolFeeBps,
     totalFeeBps,
     totalFeeUsd:    String(totalFeeUsd),
-    estimatedSeconds: est.estimatedRouteDuration,
+    estimatedSeconds: Math.round(est.estimatedRouteDuration ?? 0),
     isMultihop:     est.actions.length > 1,
     steps:          est.actions.length,
   };
