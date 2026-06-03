@@ -7,6 +7,7 @@ import { RateLimitError } from '../../lib/errors.js';
 import { insertFetchLog } from '../../db/queries.js';
 import { withTimeout } from '../../lib/utils.js';
 import { isSkipped, recordMiss, recordHit } from '../../lib/aggregator-skip.js';
+import { aggregatorSupportsRoute } from '../../config/aggregator-support.js';
 import { fetchLifi } from './lifi.js';
 import { fetchRango } from './rango.js';
 import { fetchBungee } from './bungee.js';
@@ -14,7 +15,7 @@ import { fetchRubic } from './rubic.js';
 import { fetchSquid } from './squid.js';
 
 /**
- * Hard cap on the entire pRetry loop (including wait between retries).
+ * Hard cap on the entire pRetry loop (including queue wait + retries).
  * LI.FI can be slow on complex/new-chain routes; 30s gives p-retry room for
  * one retry after a fast transient failure without blocking the batch too long.
  */
@@ -88,7 +89,9 @@ export async function fetchAllAggregators(
   const allIds = Object.keys(aggregatorRegistry) as AggregatorId[];
   const ids = allIds.filter((id) => {
     if (subset && !subset.includes(id)) return false;
-    if (id === 'rubic') return shouldUseRubic(route);
+    if (id === 'rubic' && !shouldUseRubic(route)) return false;
+    // #1: skip aggregators known not to support this route's chains (no queue, no call).
+    if (!aggregatorSupportsRoute(id, route)) return false;
     return true;
   });
 
@@ -204,8 +207,9 @@ export async function fetchAllAggregators(
           limiter.recordFailure();
         }
 
-        // Adaptive skip: explicit no-route errors count as a miss.
-        if (isNoRoute) {
+        // #2: adaptive skip — no-route AND real timeouts count as a miss, so a route
+        // that persistently times out self-suppresses after the consecutive threshold.
+        if (isNoRoute || isTimeout) {
           recordMiss(id, route);
         }
 
