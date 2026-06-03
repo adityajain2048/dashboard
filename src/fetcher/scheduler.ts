@@ -21,8 +21,8 @@ const SWEEP_CONCURRENCY = 24;
  */
 const T1_CONCURRENCY = 24;
 
-/** T2/T3 refresh cycles — all aggregators including Rango (10 rpm). Keep low. */
-const REGULAR_CONCURRENCY = 5;
+/** T2/T3 refresh cycles — LI.FI + Bungee + Rubic (Rango globally disabled). */
+const REGULAR_CONCURRENCY = 20;
 
 /** Gap fill: non-Squid aggregators, slower rate limits. */
 const GAP_FILL_CONCURRENCY = 8;
@@ -33,13 +33,11 @@ const GAP_FILL_INTERVAL_MS = 10 * 60_000; // 10 minutes
 // ─── Aggregator subsets ───────────────────────────────────────────────────────
 
 const SQUID_ONLY: readonly AggregatorId[] = ['squid'];
-const NON_SQUID: readonly AggregatorId[] = ['lifi', 'rango', 'bungee', 'rubic'];
+const NON_SQUID: readonly AggregatorId[] = ['lifi', 'bungee', 'rubic']; // rango globally disabled (see aggregator-support.ts)
 
 /**
  * T1 aggregators: Squid (720 rpm) + LI.FI (400 rpm, 3 keys) + Bungee (100 rpm).
- * All three fire concurrently within each route so quotes are always compared side-by-side.
- * Rango (10 rpm) is too slow for T1 — it continues via T2/T3 cycles.
- * Bungee is EVM-only so non-EVM routes (Solana, Cosmos) return immediately from Bungee,
+ * Rango is globally disabled. Bungee is EVM-only so non-EVM routes return immediately,
  * keeping the effective Bungee call count at ~19/batch (of 24) → ~11.8s per batch → ~5.3 min total.
  */
 const T1_AGGREGATORS: readonly AggregatorId[] = ['squid', 'lifi', 'bungee'];
@@ -276,7 +274,7 @@ async function runTierCycle(tier: 1 | 2 | 3, aggregatorOverride?: readonly Aggre
     let errorCount = 0;
 
     // T1: fast aggregators only (LI.FI + Squid + Bungee) at higher concurrency.
-    // T2/T3: all aggregators at lower concurrency (Rango rate limit is the bottleneck).
+    // T2/T3: LI.FI + Bungee + Rubic at REGULAR_CONCURRENCY (Rango globally disabled).
     // aggregatorOverride lets pre-sweep cycles exclude Squid (avoids rate-limit contention).
     const concurrency = tier === 1 ? T1_CONCURRENCY : REGULAR_CONCURRENCY;
     const aggregators = aggregatorOverride ?? (tier === 1 ? T1_AGGREGATORS : undefined);

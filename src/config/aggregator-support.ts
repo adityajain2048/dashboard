@@ -18,6 +18,16 @@ const NON_EVM: ReadonlySet<string> = new Set(
 );
 
 /**
+ * Aggregators that are globally disabled regardless of route.
+ * Any aggregator here will never be called for any route.
+ */
+const DISABLED_AGGREGATORS: ReadonlySet<AggregatorId> = new Set<AggregatorId>([
+  // Rango: 97.7% timeout rate — Azure Container Apps egress IP is blocked by Cloudflare WAF.
+  // Every Rango call burns a 30s timeout slot, blocking T3 cycles for ~4.9 hours.
+  'rango',
+]);
+
+/**
  * Chains each aggregator is known NOT to support. A route is skipped for that
  * aggregator if either endpoint (src or dst) is in its set.
  */
@@ -28,10 +38,11 @@ const UNSUPPORTED_CHAINS: Partial<Record<AggregatorId, ReadonlySet<string>>> = {
 };
 
 /**
- * Returns false if `id` is known not to support either endpoint of `route`.
+ * Returns false if `id` is globally disabled or known not to support either endpoint of `route`.
  * Unknown aggregators / chains default to supported (true).
  */
 export function aggregatorSupportsRoute(id: AggregatorId, route: RouteKey): boolean {
+  if (DISABLED_AGGREGATORS.has(id)) return false;
   const unsupported = UNSUPPORTED_CHAINS[id];
   if (!unsupported) return true;
   return !unsupported.has(route.src) && !unsupported.has(route.dst);
