@@ -63,6 +63,8 @@ export class AdaptiveLimiter implements IAdaptiveLimiter {
   private consecutiveSuccesses = 0;
   private consecutiveFailures = 0;
   private circuitOpenUntil = 0;
+  /** While Date.now() < this, further 429s are the same event and are ignored. */
+  private pausedUntil = 0;
 
   constructor(
     private readonly name: string,
@@ -91,6 +93,15 @@ export class AdaptiveLimiter implements IAdaptiveLimiter {
   }
 
   on429(retryAfterMs: number): void {
+    // Coalesce a burst of concurrent 429s into ONE backoff. Many in-flight
+    // requests on the same key get 429'd together; without this guard each one
+    // multiplies the backoff, collapsing the rate geometrically (e.g. LI.FI
+    // 0.66→0.13 req/s in one second from 5 simultaneous 429s). The floor keeps
+    // the dedup window sane when retryAfterMs is small.
+    const now = Date.now();
+    if (now < this.pausedUntil) return;
+    this.pausedUntil = now + Math.max(retryAfterMs, 2_000);
+
     void this.bottleneck.currentReservoir().then((current) => {
       if (current !== null && current > 0) {
         void this.bottleneck.incrementReservoir(-current);

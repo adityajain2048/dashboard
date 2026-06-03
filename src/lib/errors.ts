@@ -24,3 +24,21 @@ export class RateLimitError extends Error {
     this.key = key;
   }
 }
+
+/**
+ * NoRouteError — thrown by a fetcher when the upstream DEFINITIVELY has no route
+ * for this pair (HTTP 400/404, a 500 "Low liquidity", an unsupported chain, etc.).
+ * Carries the reason so the coordinator can persist WHY a task was empty instead
+ * of silently returning []. Treated as a non-retryable `no_route`: it does NOT
+ * advance the circuit breaker and is not retried by p-retry.
+ */
+export class NoRouteError extends Error {
+  /** The bare reason without the `<source>: ` prefix, for storage in fetch_log. */
+  readonly reason: string;
+
+  constructor(reason: string, source?: string) {
+    super(`${source ? `${source}: ` : ''}${reason}`);
+    this.name = 'NoRouteError';
+    this.reason = reason;
+  }
+}

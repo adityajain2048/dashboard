@@ -3,7 +3,7 @@ import type { NormalizedQuote, RouteKey, AggregatorId } from '../../types/index.
 import type { Logger } from '../../lib/logger.js';
 import { logger as rootLogger } from '../../lib/logger.js';
 import { getAggregatorLimiter } from '../../lib/rate-limiter.js';
-import { RateLimitError } from '../../lib/errors.js';
+import { RateLimitError, NoRouteError } from '../../lib/errors.js';
 import { insertFetchLog } from '../../db/queries.js';
 import { withTimeout } from '../../lib/utils.js';
 import { isSkipped, recordMiss, recordHit } from '../../lib/aggregator-skip.js';
@@ -144,6 +144,11 @@ export async function fetchAllAggregators(
                   // AbortError stops p-retry — don't retry 429s inline.
                   throw new AbortError(error.message);
                 }
+                if (error instanceof NoRouteError) {
+                  // Definitive no-route — don't waste retries. Prefix marks it for
+                  // the catch block; the reason is preserved for fetch_log.
+                  throw new AbortError(`no_route: ${error.reason}`);
+                }
                 // Transient errors: let p-retry handle the backoff.
                 log.debug(
                   { attempt: attemptNumber, retriesLeft, err: error.message.slice(0, 80) },
@@ -158,23 +163,29 @@ export async function fetchAllAggregators(
         const responseMs = Date.now() - startMs;
         limiter.recordSuccess();
 
-        const bridgesFound = result.map((q) => q.bridge);
         for (const q of result) bridgesSeen.add(q.bridge);
 
         if (result.length > 0) {
           recordHit(id, route);
+          log.debug({ responseMs, quotes: result.length, bridges: result.map((q) => q.bridge) }, `${id} OK`);
+          await insertFetchLog({
+            batchId, ts: new Date(), srcChain: route.src, dstChain: route.dst,
+            asset: route.asset, amountTier: route.amountTier, source: id,
+            bridge: null, status: 'success', responseMs, errorMessage: null,
+            quoteCount: result.length,
+          }).catch(() => {});
         } else {
+          // Empty 200 = no route, not a success. Label it accurately. Adapters that
+          // know the reason throw NoRouteError (handled below); a bare [] has none.
           recordMiss(id, route);
+          log.debug({ responseMs }, `${id}: no route (empty)`);
+          await insertFetchLog({
+            batchId, ts: new Date(), srcChain: route.src, dstChain: route.dst,
+            asset: route.asset, amountTier: route.amountTier, source: id,
+            bridge: null, status: 'no_route', responseMs, errorMessage: 'no quote returned',
+            quoteCount: 0,
+          }).catch(() => {});
         }
-
-        log.debug({ responseMs, quotes: result.length, bridges: bridgesFound }, `${id} OK`);
-
-        await insertFetchLog({
-          batchId, ts: new Date(), srcChain: route.src, dstChain: route.dst,
-          asset: route.asset, amountTier: route.amountTier, source: id,
-          bridge: null, status: 'success', responseMs, errorMessage: null,
-          quoteCount: result.length,
-        }).catch(() => {});
 
         return result;
 
@@ -182,14 +193,21 @@ export async function fetchAllAggregators(
         const responseMs = Date.now() - startMs;
         const isRateLimit = err instanceof RateLimitError ||
           (err instanceof AbortError && err.message.toLowerCase().includes('rate limit'));
-        const errorMessage = err instanceof Error ? err.message : String(err);
+        const rawMessage = err instanceof Error ? err.message : String(err);
+        // NoRouteError travels through p-retry as an AbortError prefixed "no_route: ".
+        const isNoRouteErr = err instanceof NoRouteError || rawMessage.startsWith('no_route: ');
+        // Store the bare reason regardless of which form the error arrived in.
+        const errorMessage = err instanceof NoRouteError
+          ? err.reason
+          : rawMessage.replace(/^no_route:\s*/, '');
         const lower = errorMessage.toLowerCase();
-        const isTimeout = err instanceof Error && err.message === 'timeout';
+        const isTimeout = !isNoRouteErr && err instanceof Error && err.message === 'timeout';
         const isHttp400 = lower.includes('http 400') || lower.includes('http 404');
         const isNoRoute =
           !isTimeout &&
           !isRateLimit &&
-          (isHttp400 ||
+          (isNoRouteErr ||
+            isHttp400 ||
             lower.includes('none of the available routes') ||
             lower.includes('no route') ||
             lower.includes('operation was aborted'));
@@ -213,10 +231,14 @@ export async function fetchAllAggregators(
           recordMiss(id, route);
         }
 
-        log.warn(
-          { responseMs, status, error: errorMessage.slice(0, 120) },
-          `${id}: ${isTimeout ? 'timeout' : errorMessage.slice(0, 60)}`
-        );
+        // no_route is expected (unsupported chain / low liquidity) — debug, not warn.
+        const logFields = { responseMs, status, error: errorMessage.slice(0, 120) };
+        const logMsg = `${id}: ${isTimeout ? 'timeout' : errorMessage.slice(0, 60)}`;
+        if (isNoRoute) {
+          log.debug(logFields, logMsg);
+        } else {
+          log.warn(logFields, logMsg);
+        }
 
         await insertFetchLog({
           batchId, ts: new Date(), srcChain: route.src, dstChain: route.dst,
