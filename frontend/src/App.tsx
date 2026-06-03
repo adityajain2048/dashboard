@@ -2,6 +2,7 @@
    APP SHELL — Squid Bridge Intelligence. Sidebar nav + top control bar +
    view router. Asset / tier / live-status state is shared across views and
    driven entirely by the backend (/api/health for liveness).
+   v2 — dynamic aggregator/bridge counts; no-CDN-cache headers
    ════════════════════════════════════════════════════════════════════════ */
 import { useState, useEffect, useCallback } from 'react';
 import { fetchHealth } from './api/client';

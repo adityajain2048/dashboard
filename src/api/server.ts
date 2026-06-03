@@ -40,6 +40,17 @@ export async function buildServer(): Promise<ReturnType<typeof Fastify>> {
     done();
   });
 
+  // Prevent Vercel CDN (and any other proxy) from caching API responses.
+  // Without this, Vercel's edge caches responses and all users see stale data
+  // even after a hard-refresh or opening a new browser.
+  app.addHook('onSend', (req, reply, _payload, done) => {
+    if (req.url.startsWith('/api/')) {
+      reply.header('Cache-Control', 'no-cache, no-store, must-revalidate');
+      reply.header('Pragma', 'no-cache');
+    }
+    done();
+  });
+
   app.setErrorHandler((error: Error & { statusCode?: number }, req, reply) => {
     const log = (req as unknown as Record<string, unknown>)['log'] as typeof logger | undefined;
     (log ?? logger).error({ err: error, method: req.method, url: req.url }, 'Request error');
