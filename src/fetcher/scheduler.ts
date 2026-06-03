@@ -234,9 +234,12 @@ const cycleRunning = new Map<number, boolean>();
 
 /**
  * Refresh cycle for a given tier: re-fetch all routes in that tier from ALL aggregators.
- * Only starts after the initial Squid sweep completes.
+ *
+ * @param aggregatorOverride - Optional subset of aggregators to use instead of the tier default.
+ *   Used for pre-sweep cycles (non-Squid only) so lifi/rango/bungee start immediately
+ *   without contending with the Squid sweep's rate-limit budget.
  */
-async function runTierCycle(tier: 1 | 2 | 3): Promise<void> {
+async function runTierCycle(tier: 1 | 2 | 3, aggregatorOverride?: readonly AggregatorId[]): Promise<void> {
   if (cycleRunning.get(tier)) {
     logger.info({ component: 'scheduler', tier }, `Tier ${tier} skipped (previous cycle still running)`);
     return;
@@ -273,10 +276,11 @@ async function runTierCycle(tier: 1 | 2 | 3): Promise<void> {
     let emptyCount = 0;
     let errorCount = 0;
 
-    // T1: fast aggregators only (LI.FI + Squid) at higher concurrency.
+    // T1: fast aggregators only (LI.FI + Squid + Bungee) at higher concurrency.
     // T2/T3: all aggregators at lower concurrency (Rango rate limit is the bottleneck).
+    // aggregatorOverride lets pre-sweep cycles exclude Squid (avoids rate-limit contention).
     const concurrency = tier === 1 ? T1_CONCURRENCY : REGULAR_CONCURRENCY;
-    const aggregators = tier === 1 ? T1_AGGREGATORS : undefined;
+    const aggregators = aggregatorOverride ?? (tier === 1 ? T1_AGGREGATORS : undefined);
 
     for (const batch of chunk(tasks, concurrency)) {
       const results = await Promise.allSettled(
@@ -335,36 +339,53 @@ export function startScheduler(): void {
   }, 30 * 60_000);
 
   // Load adaptive skip map from DB before any API calls.
-  // Prevents wasted calls to aggregator+route pairs that are already known to be dead.
-  // Skip the sweep only if SQUID specifically has recent quotes (within 30 min).
+  const skipMapReady = loadSkipMap()
+    .catch((e) => logger.warn(e, 'Failed to load skip map — continuing without'));
+
+  // ── Pre-sweep cycles: start lifi/bungee/rango/rubic immediately ──────────────
+  // Don't wait for the Squid sweep — it takes up to ~2.5h on a cold DB and blocks
+  // nothing that lifi/bungee/rango actually need. Use non-Squid aggregators only so
+  // these cycles don't contest Squid's 720 rpm rate-limit budget with the sweep.
+  // One-shot immediate runs; the regular intervals (with full Squid) start after sweep.
+  skipMapReady.then(() => {
+    logger.info(
+      { component: 'scheduler' },
+      'Pre-sweep cycles starting — lifi/bungee for T1, all non-Squid for T2/T3'
+    );
+    setTimeout(() => runTierCycle(1, ['lifi', 'bungee']).catch((e) => logger.error(e, 'Pre-sweep T1 error')), 0);
+    setTimeout(() => runTierCycle(2, NON_SQUID).catch((e) => logger.error(e, 'Pre-sweep T2 error')), 60_000);
+    setTimeout(() => runTierCycle(3, NON_SQUID).catch((e) => logger.error(e, 'Pre-sweep T3 error')), 2 * 60_000);
+  });
+
+  // ── Squid sweep + gap fill ────────────────────────────────────────────────────
+  // Skip the sweep only if Squid specifically has recent quotes (within 30 min).
   // Using hasRecentSquidQuotes (not hasRecentQuotes) is critical: LI.FI/Bungee data
   // being fresh should NOT suppress the Squid sweep — if Squid's data is stale (e.g.
   // after a rate-limit event), we must re-sweep all routes through Squid regardless of
   // what other aggregators have stored.
-  const sweepPromise = loadSkipMap()
-    .catch((e) => logger.warn(e, 'Failed to load skip map — continuing without'))
+  const sweepPromise = skipMapReady
     .then(() => hasRecentSquidQuotes(SKIP_SWEEP_IF_FRESH_MS))
     .then(async (squidFresh) => {
-    if (squidFresh) {
+      if (squidFresh) {
+        logger.info(
+          { component: 'scheduler' },
+          'Recent Squid quotes found in DB — skipping Squid sweep, populating gap keys from DB'
+        );
+        // Even when sweep is skipped, we must populate squidGapKeys from DB so gap fill
+        // correctly identifies routes Squid doesn't cover (non-Squid aggregators fill those).
+        await refreshGapKeysFromDB();
+        return;
+      }
       logger.info(
         { component: 'scheduler' },
-        'Recent Squid quotes found in DB — skipping Squid sweep, populating gap keys from DB'
+        'No recent Squid quotes in DB — running full Squid sweep to index all routes'
       );
-      // Even when sweep is skipped, we must populate squidGapKeys from DB so gap fill
-      // correctly identifies routes Squid doesn't cover (non-Squid aggregators fill those).
+      await runSquidSweep();
+      // After sweep: re-derive gap keys from DB. This is more accurate than sweep results
+      // because sweep-time 429 cooldowns produce false-positive gaps (routes Squid CAN cover
+      // but was rate-limited for). DB reflects what Squid actually stored.
       await refreshGapKeysFromDB();
-      return;
-    }
-    logger.info(
-      { component: 'scheduler' },
-      'No recent Squid quotes in DB — running full Squid sweep to index all routes'
-    );
-    await runSquidSweep();
-    // After sweep: re-derive gap keys from DB. This is more accurate than sweep results
-    // because sweep-time 429 cooldowns produce false-positive gaps (routes Squid CAN cover
-    // but was rate-limited for). DB reflects what Squid actually stored.
-    await refreshGapKeysFromDB();
-  });
+    });
 
   sweepPromise
     .then(() => {
@@ -373,32 +394,22 @@ export function startScheduler(): void {
         `Sweep done. Starting periodic cycles and gap fill for ${squidGapKeys.size} non-Squid routes.`
       );
 
-      // Run gap fill immediately after sweep, then every 10 min
+      // Run gap fill immediately after sweep, then every 10 min.
+      // Gap fill needs squidGapKeys populated — must stay inside sweepPromise.then().
       runGapFillCycle().catch((e) => logger.error(e, 'Gap fill error'));
       setInterval(() => {
         runGapFillCycle().catch((e) => logger.error(e, 'Gap fill error'));
       }, GAP_FILL_INTERVAL_MS);
 
-      // Stagger T1/T2/T3 starts to avoid thundering herd on all APIs at once
-      setTimeout(() => {
-        runTierCycle(1).catch((e) => logger.error(e, 'Tier 1 cycle error'));
-      }, 0);
-      setTimeout(() => {
-        runTierCycle(2).catch((e) => logger.error(e, 'Tier 2 cycle error'));
-      }, 2 * 60_000);
-      setTimeout(() => {
-        runTierCycle(3).catch((e) => logger.error(e, 'Tier 3 cycle error'));
-      }, 4 * 60_000);
+      // Start full T1/T2/T3 cycles with all aggregators (including Squid).
+      // Stagger slightly to avoid thundering herd on all APIs at once.
+      setTimeout(() => { runTierCycle(1).catch((e) => logger.error(e, 'Tier 1 cycle error')); }, 0);
+      setTimeout(() => { runTierCycle(2).catch((e) => logger.error(e, 'Tier 2 cycle error')); }, 2 * 60_000);
+      setTimeout(() => { runTierCycle(3).catch((e) => logger.error(e, 'Tier 3 cycle error')); }, 4 * 60_000);
 
-      setInterval(() => {
-        runTierCycle(1).catch((e) => logger.error(e, 'Tier 1 cycle error'));
-      }, REFRESH_INTERVALS[1]);
-      setInterval(() => {
-        runTierCycle(2).catch((e) => logger.error(e, 'Tier 2 cycle error'));
-      }, REFRESH_INTERVALS[2]);
-      setInterval(() => {
-        runTierCycle(3).catch((e) => logger.error(e, 'Tier 3 cycle error'));
-      }, REFRESH_INTERVALS[3]);
+      setInterval(() => { runTierCycle(1).catch((e) => logger.error(e, 'Tier 1 cycle error')); }, REFRESH_INTERVALS[1]);
+      setInterval(() => { runTierCycle(2).catch((e) => logger.error(e, 'Tier 2 cycle error')); }, REFRESH_INTERVALS[2]);
+      setInterval(() => { runTierCycle(3).catch((e) => logger.error(e, 'Tier 3 cycle error')); }, REFRESH_INTERVALS[3]);
     })
     .catch((e) => {
       logger.error(e, 'Startup sequence failed — starting periodic cycles immediately as fallback');
