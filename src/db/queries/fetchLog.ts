@@ -90,6 +90,27 @@ export async function upsertAggregatorMiss(
 }
 
 /**
+ * Clear all Squid skip entries for routes where src OR dst is one of the given
+ * chain slugs. Called at startup so priority chains are never blocked by stale
+ * skip entries from a previous session where Squid had no data for them.
+ * Returns the number of rows cleared.
+ */
+export async function clearSquidSkipsForChains(chains: readonly string[]): Promise<number> {
+  if (chains.length === 0) return 0;
+  const result = await query<{ count: string }>(
+    `WITH deleted AS (
+       DELETE FROM aggregator_route_skip
+       WHERE aggregator = 'squid'
+         AND (src_chain = ANY($1) OR dst_chain = ANY($1))
+       RETURNING 1
+     )
+     SELECT COUNT(*)::text AS count FROM deleted`,
+    [chains]
+  );
+  return parseInt(result.rows[0]?.count ?? '0', 10);
+}
+
+/**
  * Reset miss tracking for a (route, aggregator) pair after a successful quote.
  * Clears skip_until so the aggregator is probed again on the next cycle.
  */

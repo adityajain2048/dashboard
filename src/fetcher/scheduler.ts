@@ -4,8 +4,8 @@ import { processRoute } from './pipeline.js';
 import { generateBatchId, chunk } from '../lib/utils.js';
 import { logger } from '../lib/logger.js';
 import { refreshNativePrices } from '../lib/prices.js';
-import { getGapCoverage, hasRecentQuotes, hasRecentSquidQuotes, getSquidGapKeys } from '../db/queries.js';
-import { loadSkipMap } from '../lib/aggregator-skip.js';
+import { getGapCoverage, hasRecentQuotes, hasRecentSquidQuotes, getSquidGapKeys, clearSquidSkipsForChains } from '../db/queries.js';
+import { loadSkipMap, skipMap } from '../lib/aggregator-skip.js';
 
 // ─── Concurrency constants ────────────────────────────────────────────────────
 
@@ -368,6 +368,33 @@ export function startScheduler(): void {
 
   // Load adaptive skip map from DB before any API calls.
   loadSkipMap().catch((e) => logger.warn(e, 'Failed to load skip map — continuing without'));
+
+  // ── Clear stale Squid skips for priority chains ───────────────────────────────
+  // Priority chains (Cosmos IBC + exotic EVM) may have accumulated Squid skip
+  // entries from earlier sessions where Squid had no data for them. Wipe those
+  // entries so the sweep can actually call Squid for these chains instead of
+  // hitting the adaptive-skip early-exit every time.
+  clearSquidSkipsForChains([...SQUID_PRIORITY_CHAINS])
+    .then((cleared) => {
+      if (cleared > 0) {
+        // Remove cleared entries from the in-memory map so the current session
+        // honours the reset immediately without waiting for a map reload.
+        for (const [key] of [...skipMap.entries()]) {
+          const parts = key.split(':'); // aggregator:src:dst:asset:tier
+          if (
+            parts[0] === 'squid' &&
+            (SQUID_PRIORITY_CHAINS.has(parts[1] ?? '') || SQUID_PRIORITY_CHAINS.has(parts[2] ?? ''))
+          ) {
+            skipMap.delete(key);
+          }
+        }
+        logger.info(
+          { component: 'scheduler', cleared },
+          `Cleared ${cleared} stale Squid skip entries for priority chains`
+        );
+      }
+    })
+    .catch((e) => logger.warn(e, 'Failed to clear Squid skip entries for priority chains'));
 
   // ── Pre-sweep: lifi/bungee/rubic across all routes immediately ───────────────
   setTimeout(
