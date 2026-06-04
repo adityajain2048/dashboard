@@ -78,8 +78,8 @@ export async function upsertAggregatorMiss(
        miss_count   = aggregator_route_skip.miss_count + 1,
        last_miss_at = NOW(),
        skip_until   = CASE
-         WHEN aggregator_route_skip.miss_count + 1 >= 11 THEN NOW() + INTERVAL '7 days'
-         WHEN aggregator_route_skip.miss_count + 1 >= 8  THEN NOW() + INTERVAL '24 hours'
+         WHEN aggregator_route_skip.miss_count + 1 >= 8  THEN NOW() + INTERVAL '7 days'
+         WHEN aggregator_route_skip.miss_count + 1 >= 5  THEN NOW() + INTERVAL '24 hours'
          ELSE NULL
        END
      RETURNING miss_count, skip_until`,
@@ -90,22 +90,19 @@ export async function upsertAggregatorMiss(
 }
 
 /**
- * Clear all Squid skip entries for routes where src OR dst is one of the given
- * chain slugs. Called at startup so priority chains are never blocked by stale
- * skip entries from a previous session where Squid had no data for them.
+ * Clear ALL Squid skip entries from the DB. Called at startup before the sweep
+ * so every route gets a fresh probe — stale skip entries from a previous session
+ * (e.g. when the sweep was broken) cannot block current calls.
  * Returns the number of rows cleared.
  */
-export async function clearSquidSkipsForChains(chains: readonly string[]): Promise<number> {
-  if (chains.length === 0) return 0;
+export async function clearAllSquidSkips(): Promise<number> {
   const result = await query<{ count: string }>(
     `WITH deleted AS (
        DELETE FROM aggregator_route_skip
        WHERE aggregator = 'squid'
-         AND (src_chain = ANY($1) OR dst_chain = ANY($1))
        RETURNING 1
      )
-     SELECT COUNT(*)::text AS count FROM deleted`,
-    [chains]
+     SELECT COUNT(*)::text AS count FROM deleted`
   );
   return parseInt(result.rows[0]?.count ?? '0', 10);
 }

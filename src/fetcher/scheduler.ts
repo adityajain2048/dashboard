@@ -4,7 +4,7 @@ import { processRoute } from './pipeline.js';
 import { generateBatchId, chunk } from '../lib/utils.js';
 import { logger } from '../lib/logger.js';
 import { refreshNativePrices } from '../lib/prices.js';
-import { getGapCoverage, hasRecentQuotes, hasRecentSquidQuotes, getSquidGapKeys, clearSquidSkipsForChains } from '../db/queries.js';
+import { getGapCoverage, hasRecentQuotes, hasRecentSquidQuotes, getSquidGapKeys, clearAllSquidSkips } from '../db/queries.js';
 import { loadSkipMap, skipMap } from '../lib/aggregator-skip.js';
 
 // ─── Concurrency constants ────────────────────────────────────────────────────
@@ -366,36 +366,6 @@ export function startScheduler(): void {
     loadSkipMap().catch((e) => logger.warn(e, 'Skip map refresh failed'));
   }, 30 * 60_000);
 
-  // Load adaptive skip map from DB before any API calls.
-  loadSkipMap().catch((e) => logger.warn(e, 'Failed to load skip map — continuing without'));
-
-  // ── Clear stale Squid skips for priority chains ───────────────────────────────
-  // Priority chains (Cosmos IBC + exotic EVM) may have accumulated Squid skip
-  // entries from earlier sessions where Squid had no data for them. Wipe those
-  // entries so the sweep can actually call Squid for these chains instead of
-  // hitting the adaptive-skip early-exit every time.
-  clearSquidSkipsForChains([...SQUID_PRIORITY_CHAINS])
-    .then((cleared) => {
-      if (cleared > 0) {
-        // Remove cleared entries from the in-memory map so the current session
-        // honours the reset immediately without waiting for a map reload.
-        for (const [key] of [...skipMap.entries()]) {
-          const parts = key.split(':'); // aggregator:src:dst:asset:tier
-          if (
-            parts[0] === 'squid' &&
-            (SQUID_PRIORITY_CHAINS.has(parts[1] ?? '') || SQUID_PRIORITY_CHAINS.has(parts[2] ?? ''))
-          ) {
-            skipMap.delete(key);
-          }
-        }
-        logger.info(
-          { component: 'scheduler', cleared },
-          `Cleared ${cleared} stale Squid skip entries for priority chains`
-        );
-      }
-    })
-    .catch((e) => logger.warn(e, 'Failed to clear Squid skip entries for priority chains'));
-
   // ── Pre-sweep: lifi/bungee/rubic across all routes immediately ───────────────
   setTimeout(
     () => runAllCycle(NON_SQUID).catch((e) => logger.error(e, 'Pre-sweep cycle error')),
@@ -403,7 +373,26 @@ export function startScheduler(): void {
   );
 
   // ── Squid sweep + gap fill + unified all-routes cycle ────────────────────────
-  const sweepPromise = hasRecentSquidQuotes(SKIP_SWEEP_IF_FRESH_MS)
+  // Step 1: clear ALL Squid skip entries from DB + reload the in-memory skip map.
+  // This MUST complete before hasRecentSquidQuotes / runSquidSweep so no stale
+  // skip entries block the sweep. Both operations are awaited in sequence.
+  const sweepPromise = clearAllSquidSkips()
+    .then(async (cleared) => {
+      // Purge all Squid entries from the in-memory map to match the DB state.
+      for (const key of [...skipMap.keys()]) {
+        if (key.startsWith('squid:')) skipMap.delete(key);
+      }
+      await loadSkipMap();
+      logger.info(
+        { component: 'scheduler', cleared },
+        `Cleared ${cleared} Squid skip entries and reloaded skip map`
+      );
+    })
+    .catch((e) => logger.warn(e, 'Failed to clear Squid skips — continuing'))
+    .then(async () => {
+      const squidFresh = await hasRecentSquidQuotes(SKIP_SWEEP_IF_FRESH_MS);
+      return squidFresh;
+    })
     .then(async (squidFresh) => {
       if (squidFresh) {
         logger.info(
