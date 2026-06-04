@@ -19,15 +19,15 @@ function row(overrides: Partial<RouteLatestInput> & { ageMs?: number } = {}): Ro
 }
 
 /** Returns a `now` Date aligned so thresholdMs expires exactly after `ageMs`. */
-const T1_THRESHOLD = STALE_THRESHOLD_MS[1]; // 47 min (one full cycle)
-const T2_THRESHOLD = STALE_THRESHOLD_MS[2]; // 47 min (one full cycle)
-const T3_THRESHOLD = STALE_THRESHOLD_MS[3]; // 47 min (one full cycle)
+const T1_THRESHOLD = STALE_THRESHOLD_MS;
+const T2_THRESHOLD = STALE_THRESHOLD_MS;
+const T3_THRESHOLD = STALE_THRESHOLD_MS;
 
 // ─── State classification ─────────────────────────────────────────────────────
 
 describe('computeRouteStatus — state', () => {
   it('dead when no rows', () => {
-    const result = computeRouteStatus([], 1);
+    const result = computeRouteStatus([]);
     expect(result.state).toBe('dead');
     expect(result.bestFeeBps).toBeNull();
     expect(result.bestBridge).toBeNull();
@@ -38,13 +38,13 @@ describe('computeRouteStatus — state', () => {
       row({ bridge: 'across', ageMs: 60_000 }),
       row({ bridge: 'stargate', ageMs: 60_000 }),
     ];
-    const result = computeRouteStatus(rows, 1);
+    const result = computeRouteStatus(rows);
     expect(result.state).toBe('active');
   });
 
   it('single-bridge when only 1 bridge with fresh quote', () => {
     const rows = [row({ bridge: 'across', ageMs: 60_000 })];
-    const result = computeRouteStatus(rows, 1);
+    const result = computeRouteStatus(rows);
     expect(result.state).toBe('single-bridge');
   });
 
@@ -53,19 +53,19 @@ describe('computeRouteStatus — state', () => {
       row({ bridge: 'across',   ageMs: T1_THRESHOLD + 1000 }),
       row({ bridge: 'stargate', ageMs: T1_THRESHOLD + 2000 }),
     ];
-    const result = computeRouteStatus(rows, 1);
+    const result = computeRouteStatus(rows);
     expect(result.state).toBe('stale');
   });
 
   it('stale when most recent quote is older than threshold (T2 = 47 min)', () => {
     const rows = [row({ bridge: 'across', ageMs: T2_THRESHOLD + 1000 })];
-    const result = computeRouteStatus(rows, 2);
+    const result = computeRouteStatus(rows);
     expect(result.state).toBe('stale');
   });
 
   it('stale when most recent quote is older than threshold (T3 = 47 min)', () => {
     const rows = [row({ bridge: 'across', ageMs: T3_THRESHOLD + 1000 })];
-    const result = computeRouteStatus(rows, 3);
+    const result = computeRouteStatus(rows);
     expect(result.state).toBe('stale');
   });
 
@@ -75,7 +75,7 @@ describe('computeRouteStatus — state', () => {
       row({ bridge: 'across',   ageMs: T1_THRESHOLD - 1 }),
       row({ bridge: 'stargate', ageMs: T1_THRESHOLD - 1 }),
     ];
-    const result = computeRouteStatus(rows, 1);
+    const result = computeRouteStatus(rows);
     expect(result.state).toBe('active');
   });
 
@@ -86,7 +86,7 @@ describe('computeRouteStatus — state', () => {
       row({ bridge: 'across',   ageMs: 60_000 }),           // fresh
       row({ bridge: 'stargate', ageMs: T1_THRESHOLD * 10 }), // very old
     ];
-    const result = computeRouteStatus(rows, 1);
+    const result = computeRouteStatus(rows);
     // lastSeen is 1 min ago → within 47 min threshold → active
     expect(result.state).toBe('active');
   });
@@ -97,7 +97,7 @@ describe('computeRouteStatus — state', () => {
 describe('computeRouteStatus — bestFeeBps', () => {
   it('returns correct fee from stored total_fee_bps', () => {
     const rows = [row({ bridge: 'across', total_fee_bps: 25, ageMs: 60_000 })];
-    const result = computeRouteStatus(rows, 1);
+    const result = computeRouteStatus(rows);
     expect(result.bestFeeBps).toBe(25);
   });
 
@@ -110,7 +110,7 @@ describe('computeRouteStatus — bestFeeBps', () => {
       total_fee_bps: 0,
       ageMs: 60_000,
     })];
-    const result = computeRouteStatus(rows, 1);
+    const result = computeRouteStatus(rows);
     expect(result.bestFeeBps).toBe(100);
   });
 
@@ -124,7 +124,7 @@ describe('computeRouteStatus — bestFeeBps', () => {
       total_fee_bps: 0,
       ageMs: 60_000,
     })];
-    const result = computeRouteStatus(rows, 1);
+    const result = computeRouteStatus(rows);
     expect(result.bestFeeBps).toBeGreaterThanOrEqual(0);
     expect(result.bestFeeBps).toBe(0);
   });
@@ -134,7 +134,7 @@ describe('computeRouteStatus — bestFeeBps', () => {
       row({ bridge: 'across',   output_usd: '995', total_fee_bps: 50,  ageMs: 60_000 }),
       row({ bridge: 'stargate', output_usd: '998', total_fee_bps: 20,  ageMs: 60_000 }),
     ];
-    const result = computeRouteStatus(rows, 1);
+    const result = computeRouteStatus(rows);
     // stargate has higher output → lower fee → should win
     expect(result.bestBridge).toBe('stargate');
     expect(result.bestFeeBps).toBe(20);
@@ -148,7 +148,7 @@ describe('computeRouteStatus — bestFeeBps', () => {
       row({ bridge: 'across',   total_fee_bps: 15, ageMs: T1_THRESHOLD + 5000 }),
       row({ bridge: 'stargate', total_fee_bps: 20, ageMs: T1_THRESHOLD + 5000 }),
     ];
-    const result = computeRouteStatus(rows, 1);
+    const result = computeRouteStatus(rows);
     expect(result.state).toBe('stale');
     expect(result.bestFeeBps).toBe(15);
   });
@@ -157,7 +157,7 @@ describe('computeRouteStatus — bestFeeBps', () => {
     const rows = [
       row({ bridge: 'across', total_fee_bps: 15, ageMs: T1_THRESHOLD * 2 }),
     ];
-    const result = computeRouteStatus(rows, 1);
+    const result = computeRouteStatus(rows);
     expect(result.state).toBe('stale');
     expect(result.bestFeeBps).toBe(15);
   });
@@ -170,7 +170,7 @@ describe('computeRouteStatus — bestFeeBps', () => {
       row({ bridge: 'old-bridge', output_usd: '995', total_fee_bps: 5,  ageMs: T1_THRESHOLD + 5000 }),
       row({ bridge: 'new-bridge', output_usd: '980', total_fee_bps: 200, ageMs: 60_000 }),
     ];
-    const result = computeRouteStatus(rows, 1);
+    const result = computeRouteStatus(rows);
     expect(result.state).toBe('active'); // lastSeen = 1min ago (new-bridge) → fresh
     expect(result.bestBridge).toBe('old-bridge'); // within freshness window of lastSeen → ranked
     expect(result.bestFeeBps).toBe(5);
@@ -181,7 +181,7 @@ describe('computeRouteStatus — bestFeeBps', () => {
       row({ bridge: 'garbage', total_fee_bps: 1500, ageMs: 60_000 }),
       row({ bridge: 'good',    total_fee_bps: 30,   ageMs: 60_000 }),
     ];
-    const result = computeRouteStatus(rows, 1);
+    const result = computeRouteStatus(rows);
     expect(result.bestBridge).toBe('good');
     expect(result.bestFeeBps).toBe(30);
   });
@@ -191,7 +191,7 @@ describe('computeRouteStatus — bestFeeBps', () => {
       row({ bridge: 'broken', output_usd: '0', total_fee_bps: 0, ageMs: 60_000 }),
       row({ bridge: 'good',   output_usd: '999', total_fee_bps: 10, ageMs: 60_000 }),
     ];
-    const result = computeRouteStatus(rows, 1);
+    const result = computeRouteStatus(rows);
     expect(result.bestBridge).toBe('good');
   });
 });
@@ -201,7 +201,7 @@ describe('computeRouteStatus — bestFeeBps', () => {
 describe('computeRouteStatus — spreadBps', () => {
   it('spread is 0 when only one fresh bridge', () => {
     const rows = [row({ bridge: 'across', output_usd: '990', total_fee_bps: 100, ageMs: 60_000 })];
-    const result = computeRouteStatus(rows, 1);
+    const result = computeRouteStatus(rows);
     expect(result.spreadBps).toBe(0);
   });
 
@@ -210,7 +210,7 @@ describe('computeRouteStatus — spreadBps', () => {
       row({ bridge: 'across',   output_usd: '990', total_fee_bps: 100, ageMs: 60_000 }),
       row({ bridge: 'stargate', output_usd: '980', total_fee_bps: 200, ageMs: 60_000 }),
     ];
-    const result = computeRouteStatus(rows, 1);
+    const result = computeRouteStatus(rows);
     // spread = (990 - 980) / 990 * 10000 ≈ 101 bps
     expect(result.spreadBps).toBeGreaterThan(0);
     expect(result.spreadBps).toBeCloseTo(Math.round((10000 * (990 - 980)) / 990), -1);
@@ -221,7 +221,7 @@ describe('computeRouteStatus — spreadBps', () => {
       row({ bridge: 'across',   output_usd: '990', ageMs: T1_THRESHOLD + 1000 }),
       row({ bridge: 'stargate', output_usd: '980', ageMs: T1_THRESHOLD + 1000 }),
     ];
-    const result = computeRouteStatus(rows, 1);
+    const result = computeRouteStatus(rows);
     expect(result.state).toBe('stale');
     expect(result.spreadBps).toBeNull();
   });
@@ -235,7 +235,7 @@ describe('computeRouteStatus — spreadBps', () => {
       row({ bridge: 'across',   output_usd: '990', total_fee_bps: 100, ageMs: 60_000 }),
       row({ bridge: 'stargate', output_usd: '970', total_fee_bps: 300, ageMs: T1_THRESHOLD * 2 }),
     ];
-    const result = computeRouteStatus(rows, 1);
+    const result = computeRouteStatus(rows);
     expect(result.state).toBe('active');      // lastSeen = 60s ago → fresh
     expect(result.bestBridge).toBe('across'); // only fresh bridge
     expect(result.spreadBps).toBe(0);         // single fresh bridge → no spread
@@ -246,13 +246,13 @@ describe('computeRouteStatus — spreadBps', () => {
 
 describe('computeRouteStatus — worstBridge', () => {
   it('worstBridge is null when no valid rows', () => {
-    const result = computeRouteStatus([], 1);
+    const result = computeRouteStatus([]);
     expect(result.worstBridge).toBeNull();
   });
 
   it('worstBridge equals bestBridge when only one valid row', () => {
     const rows = [row({ bridge: 'across', output_usd: '990', ageMs: 60_000 })];
-    const result = computeRouteStatus(rows, 1);
+    const result = computeRouteStatus(rows);
     expect(result.worstBridge).toBe('across');
     expect(result.bestBridge).toBe('across');
   });
@@ -263,7 +263,7 @@ describe('computeRouteStatus — worstBridge', () => {
       row({ bridge: 'stargate', output_usd: '970', ageMs: 60_000 }),
       row({ bridge: 'relay',    output_usd: '950', ageMs: 60_000 }),
     ];
-    const result = computeRouteStatus(rows, 1);
+    const result = computeRouteStatus(rows);
     expect(result.bestBridge).toBe('across');  // highest
     expect(result.worstBridge).toBe('relay');  // lowest
   });
@@ -273,7 +273,7 @@ describe('computeRouteStatus — worstBridge', () => {
       row({ bridge: 'across',   output_usd: '990', ageMs: T1_THRESHOLD + 1000 }),
       row({ bridge: 'stargate', output_usd: '970', ageMs: T1_THRESHOLD + 1000 }),
     ];
-    const result = computeRouteStatus(rows, 1);
+    const result = computeRouteStatus(rows);
     expect(result.state).toBe('stale');
     expect(result.worstBridge).toBe('stargate');
   });
@@ -285,7 +285,7 @@ describe('computeRouteStatus — worstBridge', () => {
       row({ bridge: 'debridge', input_usd: '50000', output_usd: '49960.00800046', total_fee_bps: 8, ageMs: 60_000 }),
       row({ bridge: 'axelar',   input_usd: '50000', output_usd: '49954.41385768', total_fee_bps: 9, ageMs: 60_000 }),
     ];
-    const result = computeRouteStatus(rows, 2);
+    const result = computeRouteStatus(rows);
     expect(result.bestBridge).toBe('cbridge');
     expect(result.worstBridge).toBe('axelar');
     expect(result.bestOutputUsd).toBe('49997.98504000');
@@ -301,7 +301,7 @@ describe('computeRouteStatus — counts', () => {
       row({ bridge: 'across',   ageMs: 60_000 }),
       row({ bridge: 'stargate', ageMs: T1_THRESHOLD + 5000 }), // stale
     ];
-    const result = computeRouteStatus(rows, 1);
+    const result = computeRouteStatus(rows);
     expect(result.quoteCount).toBe(2);
     expect(result.bridgeCount).toBe(2);
   });
@@ -312,7 +312,7 @@ describe('computeRouteStatus — counts', () => {
       { ...row(), ts: new Date(now.getTime() - 120_000) }, // 2 min ago
       { ...row(), ts: new Date(now.getTime() - 30_000) },  // 30 s ago  ← newest
     ];
-    const result = computeRouteStatus(rows, 1, now);
+    const result = computeRouteStatus(rows, now);
     expect(result.lastSeen!.getTime()).toBeCloseTo(now.getTime() - 30_000, -2);
   });
 });

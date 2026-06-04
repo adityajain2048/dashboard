@@ -1,19 +1,13 @@
 import type { NormalizedQuote, RouteStatus, Asset } from '../../types/index.js';
-import { getRouteTier } from '../../config/routes.js';
 import { pool, query } from '../connection.js';
 import { selectBestQuote, selectWorstQuote, computeSpreadBps, reRankQuotes } from '../../lib/quoteRanking.js';
 
 /**
- * Stale threshold: a route is only marked stale after ~3 hours elapses without a
- * new quote. A full refresh cycle can take >2h, so a shorter window would flap
- * fresh routes to stale mid-cycle. This is the window the matrix "best within 3
- * hours" uses.
+ * Stale threshold: a route is marked stale after 3 hours without a new quote.
+ * A full refresh cycle can take >2h, so a shorter window would flap routes to
+ * stale mid-cycle. This is the window the matrix "best within 3 hours" uses.
  */
-export const STALE_THRESHOLD_MS: Record<1 | 2 | 3, number> = {
-  1: 3 * 60 * 60 * 1000,  // 3 hours
-  2: 3 * 60 * 60 * 1000,  // 3 hours
-  3: 3 * 60 * 60 * 1000,  // 3 hours
-};
+export const STALE_THRESHOLD_MS = 3 * 60 * 60 * 1000; // 3 hours
 
 /** A single row from route_latest as consumed by computeRouteStatus. */
 export interface RouteLatestInput {
@@ -61,10 +55,9 @@ export interface ComputedRouteStatus {
  */
 export function computeRouteStatus(
   rows: RouteLatestInput[],
-  refreshTier: 1 | 2 | 3,
   now: Date = new Date()
 ): ComputedRouteStatus {
-  const thresholdMs = STALE_THRESHOLD_MS[refreshTier];
+  const thresholdMs = STALE_THRESHOLD_MS;
 
   // ── Valid rows: filter out garbage (broken output / fee outliers) ──────────
   const validRows = rows.filter((r) => {
@@ -185,8 +178,6 @@ export async function updateRouteStatus(
   tier: number,
   _currentCycleQuotes: NormalizedQuote[]
 ): Promise<void> {
-  const refreshTier = getRouteTier(src, dst);
-
   const latestResult = await pool.query<RouteLatestInput>(
     `SELECT bridge, source, output_usd, input_usd, total_fee_bps, estimated_seconds, ts
      FROM route_latest
@@ -197,7 +188,7 @@ export async function updateRouteStatus(
   const {
     state, lastSeen, quoteCount, bridgeCount,
     bestBridge, worstBridge, bestOutputUsd, worstOutputUsd, bestFeeBps, spreadBps,
-  } = computeRouteStatus(latestResult.rows, refreshTier);
+  } = computeRouteStatus(latestResult.rows);
 
   await pool.query(
     `INSERT INTO route_status (
@@ -233,7 +224,7 @@ export async function updateRouteStatus(
       worstOutputUsd,
       spreadBps,
       bestFeeBps,
-      refreshTier,
+      1, // refresh_tier legacy column — always 1 (tier system removed)
     ]
   );
 }
@@ -335,10 +326,9 @@ interface RouteStatusRow {
   best_output_usd: string | null;
   worst_output_usd: string | null;
   spread_bps: number | null;
-  refresh_tier: number;
 }
 
-/** Get matrix data for heatmap: all route_status rows for asset and tier. */
+/** Get matrix data for heatmap: all route_status rows for asset and amount tier. */
 export async function getMatrixData(
   asset: Asset,
   tier: number
@@ -346,7 +336,7 @@ export async function getMatrixData(
   const result = await query<RouteStatusRow>(
     `SELECT src_chain, dst_chain, asset, amount_tier, state, last_seen,
             quote_count, bridge_count, best_bridge, best_output_usd, worst_output_usd,
-            spread_bps, refresh_tier
+            spread_bps
      FROM route_status
      WHERE asset = $1 AND amount_tier = $2`,
     [asset, tier]
@@ -365,7 +355,6 @@ export async function getMatrixData(
     bestOutputUsd: row.best_output_usd,
     worstOutputUsd: row.worst_output_usd,
     spreadBps: row.spread_bps,
-    refreshTier: row.refresh_tier as RouteStatus['refreshTier'],
   }));
 }
 

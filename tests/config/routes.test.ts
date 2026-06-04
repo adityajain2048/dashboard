@@ -1,9 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
   ALL_ROUTES,
-  TIER1_ROUTES,
-  TIER2_ROUTES,
-  TIER3_ROUTES,
 } from '../../src/config/routes.js';
 import { CHAIN_SLUGS } from '../../src/config/chains.js';
 import { TOKENS, getToken } from '../../src/config/tokens.js';
@@ -30,16 +27,11 @@ describe('Route Config', () => {
     }
   });
 
-  it('tier counts are reasonable', () => {
-    // Tier 1 should be biggest explicit set (high-volume pairs)
-    expect(TIER1_ROUTES.length).toBeGreaterThan(50);
-    expect(TIER1_ROUTES.length).toBeLessThan(200);
-    // Tier 2 should cover Bitcoin, Monad, MegaETH, etc.
-    expect(TIER2_ROUTES.length).toBeGreaterThan(50);
-    // Tier 3 should be the remainder
-    expect(TIER3_ROUTES.length).toBeGreaterThan(100);
-    // All tiers sum to total routes
-    expect(TIER1_ROUTES.length + TIER2_ROUTES.length + TIER3_ROUTES.length).toBe(EXPECTED_ROUTES);
+  it('all routes have assets and amounts', () => {
+    for (const route of ALL_ROUTES) {
+      expect(route.assets.length).toBeGreaterThan(0);
+      expect(route.amountTiers.length).toBeGreaterThan(0);
+    }
   });
 });
 

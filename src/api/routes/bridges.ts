@@ -8,7 +8,7 @@ import { STALE_THRESHOLD_MS } from '../../db/queries/routes.js';
 // from the matrix staleness threshold so the aggregator board, matrix, and
 // explorer all use the same window (all tiers share one value). A full refresh
 // cycle can exceed 2h, so a tighter window under-counts live routes.
-const FRESH_MINUTES = Math.round(STALE_THRESHOLD_MS[1] / 60_000);
+const FRESH_MINUTES = Math.round(STALE_THRESHOLD_MS / 60_000);
 
 /** Canonical display names for known bridges */
 const BRIDGE_NAMES: Record<string, string> = {

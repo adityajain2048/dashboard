@@ -27,14 +27,11 @@ export interface Chain {
 // ROUTE
 // ═══════════════════════════════════════════
 
-export type RefreshTier = 1 | 2 | 3;
-
 export interface Route {
   readonly src: string;           // Chain slug
   readonly dst: string;           // Chain slug
-  readonly tier: RefreshTier;
   readonly assets: readonly Asset[];
-  readonly amountTiers: readonly number[];  // USD values: [1000] or [50, 1000, 50000]
+  readonly amountTiers: readonly number[];  // USD values: [50, 1000, 50000]
 }
 
 export type Asset = 'ETH' | 'USDC' | 'USDT';
@@ -148,7 +145,6 @@ export interface RouteStatus {
   readonly bestOutputUsd: string | null;
   readonly worstOutputUsd: string | null;
   readonly spreadBps: number | null;
-  readonly refreshTier: RefreshTier;
 }
 
 // ═══════════════════════════════════════════
@@ -208,9 +204,7 @@ export interface HealthResponse {
   readonly status: 'ok' | 'degraded' | 'down';
   readonly uptime: number;
   readonly lastFetch: {
-    readonly tier1: string | null;
-    readonly tier2: string | null;
-    readonly tier3: string | null;
+    readonly lastRefresh: string | null;
   };
   readonly db: {
     readonly connected: boolean;

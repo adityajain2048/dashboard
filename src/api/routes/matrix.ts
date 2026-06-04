@@ -1,7 +1,6 @@
 import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
 import { z } from 'zod';
 import { HEATMAP_ORDER } from '../../config/chains.js';
-import { getRouteTier } from '../../config/routes.js';
 import { pool } from '../../db/connection.js';
 import { computeRouteStatus } from '../../db/queries.js';
 import type { RouteLatestInput } from '../../db/queries.js';
@@ -79,54 +78,6 @@ export default async function matrixRoutes(
       });
     }
 
-    // ── Fallback: for routes with no data at the requested tier, use the BEST
-    // quote from the OTHER tiers (lowest fee bps), not just the most recent, so
-    // the matrix shows the best available rather than a blank. Selected-tier data
-    // is always preferred — this only fills corridors with nothing at this tier.
-    const deadKeys: string[] = [];
-    for (const src of HEATMAP_ORDER) {
-      for (const dst of HEATMAP_ORDER) {
-        if (src !== dst && !routeMap.has(`${src}:${dst}`)) {
-          deadKeys.push(`${src}:${dst}`);
-        }
-      }
-    }
-
-    if (deadKeys.length > 0) {
-      const fallbackResult = await pool.query<{
-        src_chain: string; dst_chain: string; bridge: string; source: string;
-        output_usd: string; input_usd: string; total_fee_bps: number;
-        estimated_seconds: number; ts: Date;
-      }>(
-        `SELECT DISTINCT ON (src_chain, dst_chain)
-                src_chain, dst_chain, bridge, source, output_usd, input_usd,
-                total_fee_bps, estimated_seconds, ts
-         FROM route_latest
-         WHERE asset = $1
-           AND concat(src_chain, ':', dst_chain) = ANY($2::text[])
-           AND output_usd::numeric > 0.01
-           AND (total_fee_bps IS NULL OR total_fee_bps <= 1000)
-         -- best (lowest-fee) quote from the other tiers, recency as tiebreaker
-         ORDER BY src_chain, dst_chain, total_fee_bps ASC NULLS LAST, ts DESC`,
-        [asset, deadKeys]
-      );
-      for (const row of fallbackResult.rows) {
-        const key = `${row.src_chain}:${row.dst_chain}`;
-        // Only fill in if still empty (primary tier query might have missed some)
-        if (!routeMap.has(key)) {
-          routeMap.set(key, [{
-            bridge: row.bridge,
-            source: row.source,
-            output_usd: row.output_usd,
-            input_usd: row.input_usd,
-            total_fee_bps: row.total_fee_bps,
-            estimated_seconds: row.estimated_seconds,
-            ts: row.ts,
-          }]);
-        }
-      }
-    }
-
     // ── Build cells ─────────────────────────────────────────────────────────
     const cells: Array<{
       src: string;
@@ -145,8 +96,7 @@ export default async function matrixRoutes(
       for (const dst of HEATMAP_ORDER) {
         if (src === dst) continue;
         const rows = routeMap.get(`${src}:${dst}`) ?? [];
-        const refreshTier = getRouteTier(src, dst);
-        const { state, bestBridge, bestFeeBps, quoteCount } = computeRouteStatus(rows, refreshTier);
+        const { state, bestBridge, bestFeeBps, quoteCount } = computeRouteStatus(rows);
 
         if (state === 'active') active++;
         else if (state === 'dead') dead++;

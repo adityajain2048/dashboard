@@ -47,17 +47,17 @@ describe('Regression A — ethereum→arbitrum USDC $1K', () => {
   ];
 
   it('computeRouteStatus: bestBridge = symbiosis (highest output)', () => {
-    const { bestBridge } = computeRouteStatus(rows, 1);
+    const { bestBridge } = computeRouteStatus(rows);
     expect(bestBridge).toBe('symbiosis');
   });
 
   it('computeRouteStatus: worstBridge = axelar (lowest output)', () => {
-    const { worstBridge } = computeRouteStatus(rows, 1);
+    const { worstBridge } = computeRouteStatus(rows);
     expect(worstBridge).toBe('axelar');
   });
 
   it('computeRouteStatus: bestFeeBps is not negative', () => {
-    const { bestFeeBps } = computeRouteStatus(rows, 1);
+    const { bestFeeBps } = computeRouteStatus(rows);
     expect(bestFeeBps).toBeGreaterThanOrEqual(0);
   });
 
@@ -75,7 +75,7 @@ describe('Regression A — ethereum→arbitrum USDC $1K', () => {
 
   it('matrix bestBridge matches /api/quotes row[0].bridge', () => {
     // Simulate what matrix endpoint and quotes endpoint both compute
-    const { bestBridge: matrixBest } = computeRouteStatus(rows, 1);
+    const { bestBridge: matrixBest } = computeRouteStatus(rows);
     const ranked = reRankQuotes(rows.map(r => ({
       bridge: r.bridge, source: r.source,
       outputUsd: r.output_usd, totalFeeBps: r.total_fee_bps,
@@ -94,7 +94,7 @@ describe('Regression B — ethereum→base USDC $1K (no negative bestFeeBps)', (
   ];
 
   it('bestFeeBps is 0 (not -1) when outputUsd > inputUsd', () => {
-    const { bestFeeBps } = computeRouteStatus(rows, 1);
+    const { bestFeeBps } = computeRouteStatus(rows);
     expect(bestFeeBps).toBe(0);
     expect(bestFeeBps).toBeGreaterThanOrEqual(0);
   });
@@ -106,7 +106,7 @@ describe('Regression B — ethereum→base USDC $1K (no negative bestFeeBps)', (
       row('b', 'bungee','1001', 0, 60_000, '1000'),
       row('c', 'squid', '999',  5, 60_000, '1000'),
     ];
-    const { bestFeeBps } = computeRouteStatus(moreRows, 1);
+    const { bestFeeBps } = computeRouteStatus(moreRows);
     expect(bestFeeBps).toBeGreaterThanOrEqual(0);
   });
 });
@@ -122,32 +122,32 @@ describe('Regression C — polygon→bsc USDC $50K', () => {
   ];
 
   it('bestBridge = cbridge (highest output)', () => {
-    const { bestBridge } = computeRouteStatus(rows, 2);
+    const { bestBridge } = computeRouteStatus(rows);
     expect(bestBridge).toBe('cbridge');
   });
 
   it('worstBridge = axelar (lowest output)', () => {
-    const { worstBridge } = computeRouteStatus(rows, 2);
+    const { worstBridge } = computeRouteStatus(rows);
     expect(worstBridge).toBe('axelar');
   });
 
   it('bestOutputUsd matches cbridge output', () => {
-    const { bestOutputUsd } = computeRouteStatus(rows, 2);
+    const { bestOutputUsd } = computeRouteStatus(rows);
     expect(bestOutputUsd).toBe('49997.98504000');
   });
 
   it('worstOutputUsd matches axelar output', () => {
-    const { worstOutputUsd } = computeRouteStatus(rows, 2);
+    const { worstOutputUsd } = computeRouteStatus(rows);
     expect(worstOutputUsd).toBe('49954.41385768');
   });
 
   it('spreadBps > 0 (cbridge vs axelar)', () => {
-    const { spreadBps } = computeRouteStatus(rows, 2);
+    const { spreadBps } = computeRouteStatus(rows);
     expect(spreadBps).toBeGreaterThan(0);
   });
 
   it('opportunities would include worstBridge = axelar (not null)', () => {
-    const { worstBridge } = computeRouteStatus(rows, 2);
+    const { worstBridge } = computeRouteStatus(rows);
     expect(worstBridge).not.toBeNull();
     expect(worstBridge).toBe('axelar');
   });
@@ -165,7 +165,7 @@ describe('Regression C — polygon→bsc USDC $50K', () => {
 // ─── No negative bestFeeBps from computeRouteStatus ────────────────────────────
 
 describe('Regression F — no negative bestFeeBps in any scenario', () => {
-  const staleThreshold = STALE_THRESHOLD_MS[1];
+  const staleThreshold = STALE_THRESHOLD_MS;
 
   const scenarios: Array<{ name: string; rows: RouteLatestInput[] }> = [
     {
@@ -190,7 +190,7 @@ describe('Regression F — no negative bestFeeBps in any scenario', () => {
   ];
 
   it.each(scenarios)('$name', ({ rows }) => {
-    const { bestFeeBps } = computeRouteStatus(rows, 1);
+    const { bestFeeBps } = computeRouteStatus(rows);
     // Either null (stale) or >= 0 (active). Never a negative number.
     if (bestFeeBps !== null) {
       expect(bestFeeBps).toBeGreaterThanOrEqual(0);

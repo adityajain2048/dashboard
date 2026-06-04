@@ -3,7 +3,6 @@ import { z } from 'zod';
 import { pool } from '../../db/connection.js';
 import { computeRouteStatus } from '../../db/queries.js';
 import type { RouteLatestInput } from '../../db/queries.js';
-import { getRouteTier } from '../../config/routes.js';
 
 const querySchema = z.object({
   limit: z.coerce.number().min(1).max(100).default(20),
@@ -107,11 +106,10 @@ export default async function opportunitiesRoutes(
 
     for (const [key, rows] of routeMap) {
       const meta = routeMeta.get(key)!;
-      const refreshTier = getRouteTier(meta.src, meta.dst);
       const {
         state, bestBridge, worstBridge, bestOutputUsd, worstOutputUsd,
         spreadBps, bestFeeBps, quoteCount, lastSeen,
-      } = computeRouteStatus(rows, refreshTier);
+      } = computeRouteStatus(rows);
 
       // Only include live routes with meaningful spread and reasonable fee
       if (state !== 'active' && state !== 'single-bridge') continue;

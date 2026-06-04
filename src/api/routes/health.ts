@@ -1,10 +1,11 @@
 import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
 import { getHealth, getRouteLatestMaxTs } from '../../db/queries.js';
-import { getRouteTier } from '../../config/routes.js';
 import { pool } from '../../db/connection.js';
 
 const startTime = Date.now();
-const STALE_T1_MS = 5 * 60 * 1000;
+
+/** A route is considered stale if its newest quote is older than 3 hours. */
+const STALE_THRESHOLD_MS = 3 * 60 * 60 * 1000;
 
 export default async function healthRoutes(
   app: FastifyInstance,
@@ -22,21 +23,19 @@ export default async function healthRoutes(
     const { quoteCount, oldestQuote, aggregatorCount, bridgeCount } = dbConnected
       ? await getHealth()
       : { quoteCount: 0, oldestQuote: null as Date | null, aggregatorCount: 0, bridgeCount: 0 };
+
+    // Most-recent quote timestamp across all routes (any tier)
     const rows = dbConnected ? await getRouteLatestMaxTs() : [];
-    let tier1: Date | null = null;
-    let tier2: Date | null = null;
-    let tier3: Date | null = null;
+    let lastRefresh: Date | null = null;
     for (const r of rows) {
-      const tier = getRouteTier(r.src_chain, r.dst_chain);
-      const t = r.last_ts;
-      if (tier === 1 && (!tier1 || t > tier1)) tier1 = t;
-      if (tier === 2 && (!tier2 || t > tier2)) tier2 = t;
-      if (tier === 3 && (!tier3 || t > tier3)) tier3 = t;
+      if (!lastRefresh || r.last_ts > lastRefresh) lastRefresh = r.last_ts;
     }
 
     let status: 'ok' | 'degraded' | 'down' = 'down';
     if (dbConnected) {
-      status = tier1 && Date.now() - tier1.getTime() < STALE_T1_MS ? 'ok' : 'degraded';
+      status = lastRefresh && Date.now() - lastRefresh.getTime() < STALE_THRESHOLD_MS
+        ? 'ok'
+        : 'degraded';
     }
 
     const uptime = Math.floor((Date.now() - startTime) / 1000);
@@ -45,9 +44,7 @@ export default async function healthRoutes(
       status,
       uptime,
       lastFetch: {
-        tier1: tier1?.toISOString() ?? null,
-        tier2: tier2?.toISOString() ?? null,
-        tier3: tier3?.toISOString() ?? null,
+        lastRefresh: lastRefresh?.toISOString() ?? null,
       },
       db: {
         connected: dbConnected,
