@@ -316,8 +316,14 @@ async function runAllCycle(aggregatorOverride?: readonly AggregatorId[]): Promis
  * 4. Start the unified all-routes cycle (all aggregators, every 30 min).
  */
 
-/** How fresh the DB must be to skip the Squid sweep on restart (30 minutes). */
-const SKIP_SWEEP_IF_FRESH_MS = 30 * 60_000;
+/**
+ * Only skip the Squid sweep if data is THIS fresh — prevents re-sweeping when
+ * a process crashes and immediately restarts (< 2 min gap). Any longer gap and
+ * we always sweep, even if the previous instance had just finished.
+ * Previously 30 min, which caused the sweep to be skipped when a previous
+ * instance stored a Squid quote 1 min before shutdown.
+ */
+const SKIP_SWEEP_IF_FRESH_MS = 2 * 60_000; // 2 minutes
 
 export function startScheduler(): void {
   logger.info({ component: 'scheduler' }, 'Scheduler starting — pre-sweep non-Squid cycle, then Squid sweep');
@@ -372,16 +378,17 @@ export function startScheduler(): void {
       );
 
       // Unified all-routes cycle: all aggregators, every 30 min.
-      // cycleRunning guard prevents overlap if a cycle takes longer than 30 min.
-      runAllCycle().catch((e) => logger.error(e, 'All-routes cycle error'));
+      // NOTE: the pre-sweep runAllCycle(NON_SQUID) may still be running here
+      // (it takes ~2 h for all 27K tasks). runAllCycle() uses a cycleRunning guard
+      // and will skip if the pre-sweep is in progress — the setInterval will retry
+      // every 30 min until the pre-sweep finishes and a slot opens.
       setInterval(
         () => runAllCycle().catch((e) => logger.error(e, 'All-routes cycle error')),
         REFRESH_INTERVAL_MS
       );
     })
     .catch((e) => {
-      logger.error(e, 'Startup sweep failed — starting all-routes cycle immediately as fallback');
-      runAllCycle().catch((e2) => logger.error(e2, 'All-routes cycle error'));
+      logger.error(e, 'Startup sweep failed — falling back to periodic all-routes cycle');
       setInterval(
         () => runAllCycle().catch((e2) => logger.error(e2, 'All-routes cycle error')),
         REFRESH_INTERVAL_MS

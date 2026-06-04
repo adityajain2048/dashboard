@@ -37,8 +37,13 @@ try {
 // keepAlive: TCP keepalive probes prevent Azure's network layer (or any NAT/LB)
 // from silently dropping idle connections — avoids "Connection terminated" errors
 // on the next request after a quiet period.
-// ssl.rejectUnauthorized=false: Azure PostgreSQL Flexible Server requires SSL
-// encryption but uses a non-public CA — encrypt but skip cert verification.
+// ssl: only enabled in production (Azure PostgreSQL Flexible Server requires SSL).
+// Local Docker Postgres has no SSL — hardcoding ssl here crashes the local dev
+// server on startup. DB_SSL=true can force SSL on in any env if needed.
+const useSSL =
+  process.env.DB_SSL === 'true' ||
+  (process.env.NODE_ENV === 'production' && process.env.DB_SSL !== 'false');
+
 const pool = new Pool({
   ...pgConfig,
   max: 30,
@@ -46,7 +51,7 @@ const pool = new Pool({
   connectionTimeoutMillis: 10000,
   keepAlive: true,
   keepAliveInitialDelayMillis: 10000,
-  ssl: { rejectUnauthorized: false },
+  ...(useSSL ? { ssl: { rejectUnauthorized: false } } : {}),
 });
 
 // Log idle client errors so we know when connections drop — pg auto-removes
