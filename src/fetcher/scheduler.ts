@@ -1,50 +1,43 @@
 import type { Asset, AggregatorId } from '../types/index.js';
-import { ALL_ROUTES, REFRESH_INTERVAL_MS } from '../config/routes.js';
+import { ALL_ROUTES } from '../config/routes.js';
 import { processRoute } from './pipeline.js';
 import { generateBatchId, chunk } from '../lib/utils.js';
 import { logger } from '../lib/logger.js';
 import { refreshNativePrices } from '../lib/prices.js';
-import { getGapCoverage, hasRecentQuotes, hasRecentSquidQuotes, getSquidGapKeys, clearAllSquidSkips } from '../db/queries.js';
+import {
+  getGapCoverage,
+  hasRecentSquidQuotes,
+  getSquidGapKeys,
+  clearAllSquidSkips,
+} from '../db/queries.js';
 import { loadSkipMap, skipMap } from '../lib/aggregator-skip.js';
 
-// ─── Concurrency constants ────────────────────────────────────────────────────
+// ─── Per-worker concurrency (batch size) ─────────────────────────────────────
 
-/**
- * Sweep concurrency — 10 concurrent tasks to Squid.
- * Keeps request rate well within Squid's rate limits.
- */
-const SWEEP_CONCURRENCY = 10;
+const SQUID_CONCURRENCY  = 10;  // ~4.5 rps effective (batch-wait overhead)
+const LIFI_CONCURRENCY   = 20;  // 3 keys × 3.33 rps = 10 rps combined
+const BUNGEE_CONCURRENCY = 8;
+const RUBIC_CONCURRENCY  = 5;   // fallback chains only — small task set
+const BRIDGE_CONCURRENCY = 8;
 
-/**
- * All-routes cycle concurrency — applies to the single unified non-Squid refresh cycle.
- * Without Rango's 30-second timeouts, bottleneck is Bungee (~7.5s) and LI.FI (~5s).
- * 20 concurrent → ~2-3 effective req/s per aggregator, within rate limits.
- */
-const CYCLE_CONCURRENCY = 20;
+// ─── Per-worker rest intervals (pause BETWEEN end of one cycle and start of next) ──
 
-/** Gap fill: non-Squid aggregators, slower rate limits. */
-const GAP_FILL_CONCURRENCY = 8;
+const SQUID_REST_MS  =  5 * 60_000;  //  5 min — cycle takes ~97 min
+const LIFI_REST_MS   = 10 * 60_000;  // 10 min
+const BUNGEE_REST_MS = 15 * 60_000;  // 15 min
+const RUBIC_REST_MS  = 20 * 60_000;  // 20 min (small set — fast cycle)
+const BRIDGE_REST_MS = 10 * 60_000;  // 10 min
 
-/** How often to re-run gap fill for routes Squid doesn't cover. */
-const GAP_FILL_INTERVAL_MS = 10 * 60_000; // 10 minutes
+// ─── Squid: only skip the initial sweep if data is THIS fresh ────────────────
+// Prevents re-sweeping on quick restart (<2 min crash-and-restart).
+const SKIP_SWEEP_IF_FRESH_MS = 2 * 60_000;
 
-// ─── Aggregator subsets ───────────────────────────────────────────────────────
+// ─── Squid priority chains ────────────────────────────────────────────────────
+// Routes touching these get sorted to the front of every Squid cycle so
+// Cosmos / exotic-EVM chains populate within the first few minutes.
 
-const SQUID_ONLY: readonly AggregatorId[] = ['squid'];
-// Rango globally disabled (97.7% timeout — Azure IP blocked by Cloudflare WAF).
-const NON_SQUID: readonly AggregatorId[] = ['lifi', 'bungee', 'rubic'];
-const ALL_AGGREGATORS: readonly AggregatorId[] = ['squid', 'lifi', 'bungee', 'rubic'];
-
-// ─── Squid sweep priority chains ─────────────────────────────────────────────
-
-/**
- * Chains that are covered exclusively (or primarily) by Squid and have zero
- * data until the sweep reaches them. By sorting these tasks to the front of
- * the sweep queue we get Cosmos / exotic-EVM quotes within the first few
- * minutes instead of waiting for the full EVM corpus to finish first.
- */
 const SQUID_PRIORITY_CHAINS: ReadonlySet<string> = new Set([
-  // Exotic EVM (no or minimal LI.FI / Bungee coverage)
+  // Exotic EVM (minimal LI.FI / Bungee coverage)
   'hedera', 'filecoin', 'immutable', 'kava', 'moonbeam', 'peaq', 'soneium',
   // Non-EVM
   'sui',
@@ -55,67 +48,40 @@ const SQUID_PRIORITY_CHAINS: ReadonlySet<string> = new Set([
   'persistence', 'agoric', 'archway', 'xion', 'elys', 'saga', 'migaloo',
 ]);
 
-// ─── Gap tracking ─────────────────────────────────────────────────────────────
+// ─── Rubic: fallback chains with no LI.FI / Bungee coverage ─────────────────
+const RUBIC_CHAINS: ReadonlySet<string> = new Set(['hyperliquid', 'berachain', 'abstract']);
 
-/**
- * Routes where Squid returned 0 quotes (unsupported chain pairs, no liquidity, etc.).
- * Populated during initial sweep; used to drive gap-fill cycles.
- * Format: "src:dst:asset:amountTier"
- */
+// ─── Gap key tracking (Squid worker → Bridge worker) ─────────────────────────
+// Routes where Squid has no coverage. Populated after each Squid cycle.
+// Bridge worker uses these to drive non-Squid aggregator + direct bridge calls.
+
 const squidGapKeys = new Set<string>();
 
 function makeTaskKey(src: string, dst: string, asset: string, amountTier: number): string {
   return `${src}:${dst}:${asset}:${amountTier}`;
 }
 
-// ─── Gap key helpers ──────────────────────────────────────────────────────────
-
-/** Build the flat list of all task keys (src:dst:asset:amountTier) across every route. */
-function buildAllTaskKeys(): string[] {
-  const keys: string[] = [];
+async function refreshGapKeysFromDB(): Promise<void> {
+  const allKeys: string[] = [];
   for (const route of ALL_ROUTES) {
     for (const asset of route.assets) {
       for (const amountTier of route.amountTiers) {
-        keys.push(makeTaskKey(route.src, route.dst, asset, amountTier));
+        allKeys.push(makeTaskKey(route.src, route.dst, asset, amountTier));
       }
     }
   }
-  return keys;
-}
-
-/**
- * Replace squidGapKeys with an accurate set derived from route_latest.
- * Any task key where Squid has NO stored quote is a gap.
- *
- * Using DB (not sweep results) avoids false-positive gaps caused by Squid
- * 429 cooldowns during the sweep — routes Squid was rate-limited for still
- * get retried in T1/T2/T3 cycles, and once stored they'll disappear from
- * gap keys next time this runs.
- */
-async function refreshGapKeysFromDB(): Promise<void> {
-  const allKeys = buildAllTaskKeys();
   const gaps = await getSquidGapKeys(allKeys);
   squidGapKeys.clear();
-  for (const key of gaps) {
-    squidGapKeys.add(key);
-  }
+  for (const key of gaps) squidGapKeys.add(key);
   logger.info(
-    { component: 'scheduler', gaps: squidGapKeys.size, total: allKeys.length },
-    `Squid gap keys refreshed from DB — ${squidGapKeys.size}/${allKeys.length} routes not covered by Squid`
+    { component: 'squid-worker', gaps: squidGapKeys.size, total: allKeys.length },
+    `Gap keys refreshed — ${squidGapKeys.size}/${allKeys.length} routes need non-Squid coverage`
   );
 }
 
-// ─── Sweep ────────────────────────────────────────────────────────────────────
+// ─── Shared task builder ──────────────────────────────────────────────────────
 
-/**
- * One-time initial pass: hit ALL routes × assets × tiers through Squid at full speed.
- * Runs before any periodic cycle starts. Identifies which routes Squid covers vs. gaps.
- * At 20 req/sec (1200 rpm), ~15K tasks ≈ 12–14 minutes.
- */
-async function runSquidSweep(): Promise<void> {
-  await refreshNativePrices();
-
-  // Build the flat task list: every route × every asset × every tier
+function buildTasks(): Array<{ src: string; dst: string; asset: Asset; amountTier: number }> {
   const tasks: Array<{ src: string; dst: string; asset: Asset; amountTier: number }> = [];
   for (const route of ALL_ROUTES) {
     for (const asset of route.assets) {
@@ -124,323 +90,347 @@ async function runSquidSweep(): Promise<void> {
       }
     }
   }
-
-  // Sort: routes touching a priority chain first so Cosmos / exotic-EVM chains
-  // get their Squid quotes within the first few minutes of the sweep rather
-  // than waiting for the full EVM corpus (~12K tasks) to finish.
-  tasks.sort((a, b) => {
-    const ap = SQUID_PRIORITY_CHAINS.has(a.src) || SQUID_PRIORITY_CHAINS.has(a.dst) ? 0 : 1;
-    const bp = SQUID_PRIORITY_CHAINS.has(b.src) || SQUID_PRIORITY_CHAINS.has(b.dst) ? 0 : 1;
-    return ap - bp;
-  });
-
-  const batchId = generateBatchId();
-  const log = logger.child({ component: 'squid-sweep', batchId } as Record<string, unknown>);
-  const sweepStart = Date.now();
-
-  const priorityCount = tasks.filter(
-    t => SQUID_PRIORITY_CHAINS.has(t.src) || SQUID_PRIORITY_CHAINS.has(t.dst)
-  ).length;
-
-  log.info(
-    { total: tasks.length, priority: priorityCount, concurrency: SWEEP_CONCURRENCY },
-    `Squid sweep starting — ${priorityCount} priority tasks first, ${tasks.length} total`
-  );
-
-  let covered = 0;
-  let gap = 0;
-  let errors = 0;
-  let done = 0;
-
-  for (const batch of chunk(tasks, SWEEP_CONCURRENCY)) {
-    const results = await Promise.allSettled(
-      batch.map((t) =>
-        processRoute(t.src, t.dst, t.asset, t.amountTier, batchId, log, SQUID_ONLY, true)
-      )
-    );
-
-    for (let i = 0; i < results.length; i++) {
-      const r = results[i];
-      const t = batch[i];
-      done++;
-      if (r.status === 'fulfilled') {
-        if (r.value > 0) {
-          covered++;
-        } else {
-          squidGapKeys.add(makeTaskKey(t.src, t.dst, t.asset, t.amountTier));
-          gap++;
-        }
-      } else {
-        errors++;
-        squidGapKeys.add(makeTaskKey(t.src, t.dst, t.asset, t.amountTier));
-        gap++;
-      }
-    }
-
-    // Progress log every ~1000 tasks
-    if (done % 1000 < SWEEP_CONCURRENCY) {
-      const pct = ((done / tasks.length) * 100).toFixed(1);
-      const elapsed_s = ((Date.now() - sweepStart) / 1000).toFixed(0);
-      const eta_s = done > 0
-        ? Math.round(((tasks.length - done) / done) * (Date.now() - sweepStart) / 1000)
-        : '?';
-      log.info({ done, total: tasks.length, pct, covered, gap, elapsed_s, eta_s }, 'Sweep progress');
-    }
+  // Shuffle so no chain is consistently processed last
+  for (let i = tasks.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [tasks[i], tasks[j]] = [tasks[j]!, tasks[i]!];
   }
-
-  const elapsed = ((Date.now() - sweepStart) / 1000).toFixed(1);
-  log.info(
-    { covered, gap, errors, total: tasks.length, elapsed_s: elapsed },
-    `Squid sweep complete — ${covered} routes covered, ${gap} gaps identified in ${elapsed}s`
-  );
+  return tasks;
 }
 
-// ─── Gap fill ─────────────────────────────────────────────────────────────────
+// ─── Independent worker flags ─────────────────────────────────────────────────
 
-/**
- * For routes where Squid has no coverage, call non-Squid aggregators.
- * Uses DB history to pick the specific aggregators that have shown coverage,
- * falling back to all 4 non-Squid aggregators for routes with no history.
- */
-async function runGapFillCycle(): Promise<void> {
-  if (squidGapKeys.size === 0) return;
+let squidRunning  = false;
+let lifiRunning   = false;
+let bungeeRunning = false;
+let rubicRunning  = false;
+let bridgeRunning = false;
 
-  const log = logger.child({ component: 'gap-fill' } as Record<string, unknown>);
+// ─────────────────────────────────────────────────────────────────────────────
+// SQUID WORKER — all routes, Squid only, priority chains first
+// Bridge gap-fill is skipped here — the Bridge worker handles it independently.
+// ─────────────────────────────────────────────────────────────────────────────
 
-  // Check DB for historical aggregator coverage on each gap route
-  const coverageMap = await getGapCoverage([...squidGapKeys]);
-
-  const tasks = [...squidGapKeys].map((key) => {
-    const parts = key.split(':');
-    return {
-      src: parts[0],
-      dst: parts[1],
-      asset: parts[2] as Asset,
-      amountTier: Number(parts[3]),
-      key,
-    };
-  });
-
-  log.info(
-    { gaps: tasks.length, withHistory: coverageMap.size },
-    'Gap fill cycle starting'
-  );
-
-  const batchId = generateBatchId();
-  let filled = 0;
-
-  for (const batch of chunk(tasks, GAP_FILL_CONCURRENCY)) {
-    const results = await Promise.allSettled(
-      batch.map((t) => {
-        const historicProviders = coverageMap.get(t.key) as AggregatorId[] | undefined;
-        // If we know which aggregators cover this route from DB history, use only those.
-        // Otherwise try all non-Squid aggregators to discover coverage.
-        const subset: readonly AggregatorId[] =
-          historicProviders && historicProviders.length > 0
-            ? (historicProviders as readonly AggregatorId[])
-            : NON_SQUID;
-        return processRoute(t.src, t.dst, t.asset, t.amountTier, batchId, log, subset);
-      })
-    );
-
-    for (const r of results) {
-      if (r.status === 'fulfilled' && r.value > 0) filled++;
-    }
-  }
-
-  log.info({ gaps: tasks.length, filled }, 'Gap fill cycle complete');
-}
-
-// ─── All-routes refresh cycle ─────────────────────────────────────────────────
-
-let cycleRunning = false;
-
-/**
- * Unified refresh cycle: re-fetch ALL routes from all supported aggregators.
- * No tier distinction — every route is treated equally.
- *
- * @param aggregatorOverride - Optional subset of aggregators.
- *   Used for the pre-sweep pass (NON_SQUID) so lifi/bungee/rubic start immediately
- *   without contending with the Squid sweep's 720 rpm rate-limit budget.
- *   After the sweep, all four aggregators (ALL_AGGREGATORS) are used.
- */
-async function runAllCycle(aggregatorOverride?: readonly AggregatorId[]): Promise<void> {
-  if (cycleRunning) {
-    logger.info({ component: 'scheduler' }, 'All-routes cycle skipped (previous cycle still running)');
-    return;
-  }
-  cycleRunning = true;
+async function runSquidWorker(): Promise<void> {
+  if (squidRunning) return;
+  squidRunning = true;
+  const log = logger.child({ component: 'squid-worker' } as Record<string, unknown>);
 
   try {
     await refreshNativePrices();
 
-    const batchId = generateBatchId();
-    const log = logger.child({ component: 'scheduler', batchId } as Record<string, unknown>);
+    const tasks = buildTasks();
+    // Priority chains to the front so Cosmos / exotic-EVM populate quickly
+    tasks.sort((a, b) => {
+      const ap = SQUID_PRIORITY_CHAINS.has(a.src) || SQUID_PRIORITY_CHAINS.has(a.dst) ? 0 : 1;
+      const bp = SQUID_PRIORITY_CHAINS.has(b.src) || SQUID_PRIORITY_CHAINS.has(b.dst) ? 0 : 1;
+      return ap - bp;
+    });
 
-    const tasks: Array<{ src: string; dst: string; asset: Asset; amountTier: number }> = [];
-    for (const route of ALL_ROUTES) {
-      for (const asset of route.assets) {
-        for (const amountTier of route.amountTiers) {
-          tasks.push({ src: route.src, dst: route.dst, asset, amountTier });
+    const batchId = generateBatchId();
+    const start = Date.now();
+    const priorityCount = tasks.filter(
+      t => SQUID_PRIORITY_CHAINS.has(t.src) || SQUID_PRIORITY_CHAINS.has(t.dst)
+    ).length;
+
+    log.info(
+      { total: tasks.length, priority: priorityCount, concurrency: SQUID_CONCURRENCY },
+      `Squid worker cycle starting — ${priorityCount} priority tasks first`
+    );
+
+    let covered = 0, gap = 0, errors = 0, done = 0;
+
+    for (const batch of chunk(tasks, SQUID_CONCURRENCY)) {
+      const results = await Promise.allSettled(
+        batch.map(t => processRoute(t.src, t.dst, t.asset, t.amountTier, batchId, log, ['squid'], true))
+      );
+      for (let i = 0; i < results.length; i++) {
+        const r = results[i]!;
+        const t = batch[i]!;
+        done++;
+        if (r.status === 'fulfilled' && r.value > 0) {
+          covered++;
+        } else {
+          squidGapKeys.add(makeTaskKey(t.src, t.dst, t.asset, t.amountTier));
+          if (r.status === 'rejected') errors++; else gap++;
         }
+      }
+      if (done % 1000 < SQUID_CONCURRENCY) {
+        const pct = ((done / tasks.length) * 100).toFixed(1);
+        const eta_s = done > 0
+          ? Math.round(((tasks.length - done) / done) * (Date.now() - start) / 1000)
+          : '?';
+        log.info({ done, total: tasks.length, pct, covered, gap, eta_s }, 'Squid worker progress');
       }
     }
 
-    // Shuffle so no chain is consistently processed last — prevents starvation for
-    // routes at the tail of the static CHAIN_SLUGS order (e.g. solana, Cosmos chains).
-    for (let i = tasks.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [tasks[i], tasks[j]] = [tasks[j]!, tasks[i]!];
-    }
+    await refreshGapKeysFromDB();
 
-    const aggregators = aggregatorOverride ?? ALL_AGGREGATORS;
     log.info(
-      { routes: ALL_ROUTES.length, tasks: tasks.length, aggregators },
-      'All-routes cycle starting'
+      { covered, gap, errors, total: tasks.length, elapsed_s: ((Date.now() - start) / 1000).toFixed(1) },
+      `Squid worker cycle complete`
     );
-    const cycleStart = Date.now();
-    let totalQuotes = 0;
-    let successCount = 0;
-    let emptyCount = 0;
-    let errorCount = 0;
+  } catch (err) {
+    log.error({ err }, 'Squid worker cycle error');
+  } finally {
+    squidRunning = false;
+    setTimeout(() => runSquidWorker().catch(e => logger.error(e, 'Squid worker restart error')), SQUID_REST_MS);
+  }
+}
 
-    for (const batch of chunk(tasks, CYCLE_CONCURRENCY)) {
+// ─────────────────────────────────────────────────────────────────────────────
+// LI.FI WORKER — all routes, LI.FI only
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function runLifiWorker(): Promise<void> {
+  if (lifiRunning) return;
+  lifiRunning = true;
+  const log = logger.child({ component: 'lifi-worker' } as Record<string, unknown>);
+
+  try {
+    await refreshNativePrices();
+    const batchId = generateBatchId();
+    const tasks = buildTasks();
+    const start = Date.now();
+    let totalQuotes = 0, successRoutes = 0, done = 0;
+
+    log.info({ total: tasks.length, concurrency: LIFI_CONCURRENCY }, 'LI.FI worker cycle starting');
+
+    for (const batch of chunk(tasks, LIFI_CONCURRENCY)) {
       const results = await Promise.allSettled(
-        batch.map((t) =>
-          processRoute(t.src, t.dst, t.asset, t.amountTier, batchId, log, aggregators)
-        )
+        batch.map(t => processRoute(t.src, t.dst, t.asset, t.amountTier, batchId, log, ['lifi'], true))
       );
       for (const r of results) {
-        if (r.status === 'fulfilled') {
-          const n = r.value;
-          totalQuotes += n;
-          if (n > 0) successCount++;
-          else emptyCount++;
-        } else {
-          errorCount++;
-        }
+        done++;
+        if (r.status === 'fulfilled') { totalQuotes += r.value; if (r.value > 0) successRoutes++; }
+      }
+      if (done % 2000 < LIFI_CONCURRENCY) {
+        log.info({ done, total: tasks.length, quotes: totalQuotes }, 'LI.FI worker progress');
       }
     }
 
-    const elapsed = Date.now() - cycleStart;
     log.info(
-      {
-        tasks: tasks.length,
-        quotes: totalQuotes,
-        success: successCount,
-        empty: emptyCount,
-        errors: errorCount,
-        ms: elapsed,
-      },
-      `All-routes cycle complete — ${totalQuotes} quotes from ${successCount}/${tasks.length} routes in ${(elapsed / 1000).toFixed(1)}s`
+      { quotes: totalQuotes, routes: successRoutes, total: tasks.length, elapsed_s: ((Date.now() - start) / 1000).toFixed(1) },
+      'LI.FI worker cycle complete'
     );
+  } catch (err) {
+    log.error({ err }, 'LI.FI worker cycle error');
   } finally {
-    cycleRunning = false;
+    lifiRunning = false;
+    setTimeout(() => runLifiWorker().catch(e => logger.error(e, 'LI.FI worker restart error')), LIFI_REST_MS);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BUNGEE WORKER — all routes, Bungee only
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function runBungeeWorker(): Promise<void> {
+  if (bungeeRunning) return;
+  bungeeRunning = true;
+  const log = logger.child({ component: 'bungee-worker' } as Record<string, unknown>);
+
+  try {
+    await refreshNativePrices();
+    const batchId = generateBatchId();
+    const tasks = buildTasks();
+    const start = Date.now();
+    let totalQuotes = 0, successRoutes = 0, done = 0;
+
+    log.info({ total: tasks.length, concurrency: BUNGEE_CONCURRENCY }, 'Bungee worker cycle starting');
+
+    for (const batch of chunk(tasks, BUNGEE_CONCURRENCY)) {
+      const results = await Promise.allSettled(
+        batch.map(t => processRoute(t.src, t.dst, t.asset, t.amountTier, batchId, log, ['bungee'], true))
+      );
+      for (const r of results) {
+        done++;
+        if (r.status === 'fulfilled') { totalQuotes += r.value; if (r.value > 0) successRoutes++; }
+      }
+      if (done % 2000 < BUNGEE_CONCURRENCY) {
+        log.info({ done, total: tasks.length, quotes: totalQuotes }, 'Bungee worker progress');
+      }
+    }
+
+    log.info(
+      { quotes: totalQuotes, routes: successRoutes, total: tasks.length, elapsed_s: ((Date.now() - start) / 1000).toFixed(1) },
+      'Bungee worker cycle complete'
+    );
+  } catch (err) {
+    log.error({ err }, 'Bungee worker cycle error');
+  } finally {
+    bungeeRunning = false;
+    setTimeout(() => runBungeeWorker().catch(e => logger.error(e, 'Bungee worker restart error')), BUNGEE_REST_MS);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RUBIC WORKER — fallback chains only (hyperliquid, berachain, abstract)
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function runRubicWorker(): Promise<void> {
+  if (rubicRunning) return;
+  rubicRunning = true;
+  const log = logger.child({ component: 'rubic-worker' } as Record<string, unknown>);
+
+  try {
+    await refreshNativePrices();
+    const batchId = generateBatchId();
+    const tasks = buildTasks().filter(
+      t => RUBIC_CHAINS.has(t.src) || RUBIC_CHAINS.has(t.dst)
+    );
+    const start = Date.now();
+    let totalQuotes = 0, done = 0;
+
+    log.info({ total: tasks.length, concurrency: RUBIC_CONCURRENCY }, 'Rubic worker cycle starting');
+
+    for (const batch of chunk(tasks, RUBIC_CONCURRENCY)) {
+      const results = await Promise.allSettled(
+        batch.map(t => processRoute(t.src, t.dst, t.asset, t.amountTier, batchId, log, ['rubic'], true))
+      );
+      for (const r of results) {
+        done++;
+        if (r.status === 'fulfilled') totalQuotes += r.value;
+      }
+    }
+
+    log.info(
+      { quotes: totalQuotes, total: tasks.length, elapsed_s: ((Date.now() - start) / 1000).toFixed(1) },
+      'Rubic worker cycle complete'
+    );
+  } catch (err) {
+    log.error({ err }, 'Rubic worker cycle error');
+  } finally {
+    rubicRunning = false;
+    setTimeout(() => runRubicWorker().catch(e => logger.error(e, 'Rubic worker restart error')), RUBIC_REST_MS);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BRIDGE WORKER — gap fill for routes Squid doesn't cover
+// Runs non-Squid aggregators + direct bridge APIs for squidGapKeys routes.
+// This is the ONLY worker that calls direct bridge APIs (others set skipGapFill=true).
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function runBridgeWorker(): Promise<void> {
+  if (bridgeRunning) return;
+
+  if (squidGapKeys.size === 0) {
+    // Squid worker hasn't completed a cycle yet — defer
+    logger.debug({ component: 'bridge-worker' }, 'No gap keys yet — deferring');
+    setTimeout(() => runBridgeWorker().catch(e => logger.error(e, 'Bridge worker restart error')), BRIDGE_REST_MS);
+    return;
+  }
+
+  bridgeRunning = true;
+  const log = logger.child({ component: 'bridge-worker' } as Record<string, unknown>);
+
+  try {
+    // Use DB history to prefer aggregators proven to cover each gap route
+    const coverageMap = await getGapCoverage([...squidGapKeys]);
+
+    const tasks = [...squidGapKeys].map(key => {
+      const [src, dst, asset, tierStr] = key.split(':');
+      return { src: src!, dst: dst!, asset: asset! as Asset, amountTier: Number(tierStr), key };
+    });
+
+    const batchId = generateBatchId();
+    const start = Date.now();
+    let filled = 0, done = 0;
+
+    log.info(
+      { gaps: tasks.length, withHistory: coverageMap.size, concurrency: BRIDGE_CONCURRENCY },
+      'Bridge worker cycle starting'
+    );
+
+    for (const batch of chunk(tasks, BRIDGE_CONCURRENCY)) {
+      const results = await Promise.allSettled(
+        batch.map(t => {
+          const proven = coverageMap.get(t.key) as AggregatorId[] | undefined;
+          // Use historically proven aggregators, or try all non-Squid as fallback
+          const subset: readonly AggregatorId[] =
+            proven && proven.length > 0 ? proven : ['lifi', 'bungee', 'rubic'];
+          // skipGapFill=false — bridge API calls are the whole point of this worker
+          return processRoute(t.src, t.dst, t.asset, t.amountTier, batchId, log, subset, false);
+        })
+      );
+      for (const r of results) {
+        done++;
+        if (r.status === 'fulfilled' && r.value > 0) filled++;
+      }
+      if (done % 1000 < BRIDGE_CONCURRENCY) {
+        log.info({ done, total: tasks.length, filled }, 'Bridge worker progress');
+      }
+    }
+
+    log.info(
+      { gaps: tasks.length, filled, elapsed_s: ((Date.now() - start) / 1000).toFixed(1) },
+      'Bridge worker cycle complete'
+    );
+  } catch (err) {
+    log.error({ err }, 'Bridge worker cycle error');
+  } finally {
+    bridgeRunning = false;
+    setTimeout(() => runBridgeWorker().catch(e => logger.error(e, 'Bridge worker restart error')), BRIDGE_REST_MS);
   }
 }
 
 // ─── Scheduler entry point ────────────────────────────────────────────────────
 
-/**
- * Startup sequence:
- * 1. Pre-sweep: run all routes through lifi/bungee/rubic immediately (no Squid contention).
- * 2. Run a full Squid sweep (all routes × assets × amounts) at 20 req/s.
- * 3. After sweep, start gap-fill every 10 min for routes Squid doesn't cover.
- * 4. Start the unified all-routes cycle (all aggregators, every 30 min).
- */
-
-/**
- * Only skip the Squid sweep if data is THIS fresh — prevents re-sweeping when
- * a process crashes and immediately restarts (< 2 min gap). Any longer gap and
- * we always sweep, even if the previous instance had just finished.
- * Previously 30 min, which caused the sweep to be skipped when a previous
- * instance stored a Squid quote 1 min before shutdown.
- */
-const SKIP_SWEEP_IF_FRESH_MS = 2 * 60_000; // 2 minutes
-
 export function startScheduler(): void {
-  logger.info({ component: 'scheduler' }, 'Scheduler starting — pre-sweep non-Squid cycle, then Squid sweep');
-
-  // Refresh skip map every 30 minutes to pick up new skip entries from completed cycles.
-  setInterval(() => {
-    loadSkipMap().catch((e) => logger.warn(e, 'Skip map refresh failed'));
-  }, 30 * 60_000);
-
-  // ── Pre-sweep: lifi/bungee/rubic across all routes immediately ───────────────
-  setTimeout(
-    () => runAllCycle(NON_SQUID).catch((e) => logger.error(e, 'Pre-sweep cycle error')),
-    0
+  logger.info(
+    { component: 'scheduler' },
+    'Starting independent workers: Squid · LI.FI · Bungee · Rubic · Bridge'
   );
 
-  // ── Squid sweep + gap fill + unified all-routes cycle ────────────────────────
-  // Step 1: clear ALL Squid skip entries from DB + reload the in-memory skip map.
-  // This MUST complete before hasRecentSquidQuotes / runSquidSweep so no stale
-  // skip entries block the sweep. Both operations are awaited in sequence.
-  const sweepPromise = clearAllSquidSkips()
+  // Refresh skip map every 30 min to pick up new DB entries
+  setInterval(() => {
+    loadSkipMap().catch(e => logger.warn(e, 'Skip map refresh failed'));
+  }, 30 * 60_000);
+
+  // ── LI.FI, Bungee, Rubic workers — start immediately, run independently ────
+  runLifiWorker().catch(e => logger.error(e, 'LI.FI worker startup error'));
+  runBungeeWorker().catch(e => logger.error(e, 'Bungee worker startup error'));
+  runRubicWorker().catch(e => logger.error(e, 'Rubic worker startup error'));
+
+  // ── Squid worker — clear stale skips first, then check freshness ────────────
+  clearAllSquidSkips()
     .then(async (cleared) => {
-      // Purge all Squid entries from the in-memory map to match the DB state.
       for (const key of [...skipMap.keys()]) {
         if (key.startsWith('squid:')) skipMap.delete(key);
       }
       await loadSkipMap();
-      logger.info(
-        { component: 'scheduler', cleared },
-        `Cleared ${cleared} Squid skip entries and reloaded skip map`
-      );
+      logger.info({ component: 'squid-worker', cleared }, `Cleared ${cleared} Squid skip entries`);
     })
-    .catch((e) => logger.warn(e, 'Failed to clear Squid skips — continuing'))
+    .catch(e => logger.warn(e, 'Failed to clear Squid skips — continuing'))
     .then(async () => {
       const squidFresh = await hasRecentSquidQuotes(SKIP_SWEEP_IF_FRESH_MS);
-      return squidFresh;
-    })
-    .then(async (squidFresh) => {
       if (squidFresh) {
         logger.info(
-          { component: 'scheduler' },
-          'Recent Squid quotes found in DB — skipping Squid sweep, populating gap keys from DB'
+          { component: 'squid-worker' },
+          'Recent Squid data found — loading gap keys from DB, skipping initial sweep'
         );
         await refreshGapKeysFromDB();
-        return;
+        // Rest before first cycle (data is already fresh)
+        setTimeout(
+          () => runSquidWorker().catch(e => logger.error(e, 'Squid worker startup error')),
+          SQUID_REST_MS
+        );
+      } else {
+        logger.info({ component: 'squid-worker' }, 'No recent Squid data — starting full sweep');
+        runSquidWorker().catch(e => logger.error(e, 'Squid worker startup error'));
       }
-      logger.info(
-        { component: 'scheduler' },
-        'No recent Squid quotes in DB — running full Squid sweep to index all routes'
-      );
-      await runSquidSweep();
-      // Re-derive gap keys from DB (more accurate than sweep-time tracking —
-      // 429 cooldowns during sweep create false-positive gaps).
-      await refreshGapKeysFromDB();
-    });
-
-  sweepPromise
-    .then(() => {
-      logger.info(
-        { component: 'scheduler', gaps: squidGapKeys.size },
-        `Sweep done. Starting gap fill (${squidGapKeys.size} non-Squid routes) and all-routes cycle.`
-      );
-
-      // Gap fill: every 10 min for routes Squid doesn't cover.
-      runGapFillCycle().catch((e) => logger.error(e, 'Gap fill error'));
-      setInterval(
-        () => runGapFillCycle().catch((e) => logger.error(e, 'Gap fill error')),
-        GAP_FILL_INTERVAL_MS
-      );
-
-      // Unified all-routes cycle: all aggregators, every 30 min.
-      // NOTE: the pre-sweep runAllCycle(NON_SQUID) may still be running here
-      // (it takes ~2 h for all 27K tasks). runAllCycle() uses a cycleRunning guard
-      // and will skip if the pre-sweep is in progress — the setInterval will retry
-      // every 30 min until the pre-sweep finishes and a slot opens.
-      setInterval(
-        () => runAllCycle().catch((e) => logger.error(e, 'All-routes cycle error')),
-        REFRESH_INTERVAL_MS
-      );
     })
-    .catch((e) => {
-      logger.error(e, 'Startup sweep failed — falling back to periodic all-routes cycle');
-      setInterval(
-        () => runAllCycle().catch((e2) => logger.error(e2, 'All-routes cycle error')),
-        REFRESH_INTERVAL_MS
-      );
+    .catch(e => {
+      logger.error(e, 'Squid startup failed — starting worker anyway');
+      runSquidWorker().catch(e2 => logger.error(e2, 'Squid worker startup error'));
     });
+
+  // ── Bridge worker — starts 30s after scheduler to let gap keys load ─────────
+  // If Squid data is fresh, gap keys are populated from DB immediately above.
+  // If not, the bridge worker's defer loop handles it until Squid completes.
+  setTimeout(
+    () => runBridgeWorker().catch(e => logger.error(e, 'Bridge worker startup error')),
+    30_000
+  );
 }
