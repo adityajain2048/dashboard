@@ -10,10 +10,10 @@ import { loadSkipMap } from '../lib/aggregator-skip.js';
 // ─── Concurrency constants ────────────────────────────────────────────────────
 
 /**
- * Sweep concurrency — 24 concurrent tasks ≈ 12 req/s to Squid (confirmed safe at 720 rpm).
- * Previous value of 150 caused immediate 429 bans on every startup.
+ * Sweep concurrency — 10 concurrent tasks to Squid.
+ * Keeps request rate well within Squid's rate limits.
  */
-const SWEEP_CONCURRENCY = 24;
+const SWEEP_CONCURRENCY = 10;
 
 /**
  * All-routes cycle concurrency — applies to the single unified non-Squid refresh cycle.
@@ -34,6 +34,26 @@ const SQUID_ONLY: readonly AggregatorId[] = ['squid'];
 // Rango globally disabled (97.7% timeout — Azure IP blocked by Cloudflare WAF).
 const NON_SQUID: readonly AggregatorId[] = ['lifi', 'bungee', 'rubic'];
 const ALL_AGGREGATORS: readonly AggregatorId[] = ['squid', 'lifi', 'bungee', 'rubic'];
+
+// ─── Squid sweep priority chains ─────────────────────────────────────────────
+
+/**
+ * Chains that are covered exclusively (or primarily) by Squid and have zero
+ * data until the sweep reaches them. By sorting these tasks to the front of
+ * the sweep queue we get Cosmos / exotic-EVM quotes within the first few
+ * minutes instead of waiting for the full EVM corpus to finish first.
+ */
+const SQUID_PRIORITY_CHAINS: ReadonlySet<string> = new Set([
+  // Exotic EVM (no or minimal LI.FI / Bungee coverage)
+  'hedera', 'filecoin', 'immutable', 'kava', 'moonbeam', 'peaq', 'soneium',
+  // Non-EVM
+  'sui',
+  // Cosmos / IBC
+  'osmosis', 'cosmoshub', 'neutron', 'dydx', 'sei', 'injective',
+  'celestia', 'axelar', 'kujira', 'terra', 'dymension',
+  'stargaze', 'akash', 'stride', 'juno', 'noble',
+  'persistence', 'agoric', 'archway', 'xion', 'elys', 'saga', 'migaloo',
+]);
 
 // ─── Gap tracking ─────────────────────────────────────────────────────────────
 
@@ -105,13 +125,26 @@ async function runSquidSweep(): Promise<void> {
     }
   }
 
+  // Sort: routes touching a priority chain first so Cosmos / exotic-EVM chains
+  // get their Squid quotes within the first few minutes of the sweep rather
+  // than waiting for the full EVM corpus (~12K tasks) to finish.
+  tasks.sort((a, b) => {
+    const ap = SQUID_PRIORITY_CHAINS.has(a.src) || SQUID_PRIORITY_CHAINS.has(a.dst) ? 0 : 1;
+    const bp = SQUID_PRIORITY_CHAINS.has(b.src) || SQUID_PRIORITY_CHAINS.has(b.dst) ? 0 : 1;
+    return ap - bp;
+  });
+
   const batchId = generateBatchId();
   const log = logger.child({ component: 'squid-sweep', batchId } as Record<string, unknown>);
   const sweepStart = Date.now();
 
+  const priorityCount = tasks.filter(
+    t => SQUID_PRIORITY_CHAINS.has(t.src) || SQUID_PRIORITY_CHAINS.has(t.dst)
+  ).length;
+
   log.info(
-    { total: tasks.length, concurrency: SWEEP_CONCURRENCY },
-    `Squid sweep starting — ${tasks.length} tasks, Squid only, at 20 req/s`
+    { total: tasks.length, priority: priorityCount, concurrency: SWEEP_CONCURRENCY },
+    `Squid sweep starting — ${priorityCount} priority tasks first, ${tasks.length} total`
   );
 
   let covered = 0;
