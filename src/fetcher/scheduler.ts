@@ -155,7 +155,7 @@ async function runSquidSweep(): Promise<void> {
   for (const batch of chunk(tasks, SWEEP_CONCURRENCY)) {
     const results = await Promise.allSettled(
       batch.map((t) =>
-        processRoute(t.src, t.dst, t.asset, t.amountTier, batchId, log, SQUID_ONLY)
+        processRoute(t.src, t.dst, t.asset, t.amountTier, batchId, log, SQUID_ONLY, true)
       )
     );
 

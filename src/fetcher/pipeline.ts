@@ -20,7 +20,9 @@ export async function processRoute(
   batchId: string,
   parentLog?: Logger,
   /** Limit which aggregators are called. undefined = all applicable. */
-  aggregators?: AggregatorSubset
+  aggregators?: AggregatorSubset,
+  /** When true, skip the bridge gap-fill step (used by Squid sweep to avoid slow bridge calls). */
+  skipGapFill?: boolean
 ): Promise<number> {
   const route = routeTag(src, dst, asset, amountTier);
   const log = (parentLog ?? rootLogger).child({ route });
@@ -29,7 +31,7 @@ export async function processRoute(
   const routeKey: RouteKey = { src, dst, asset, amountTier };
 
   const { quotes: aggQuotes, bridgesSeen } = await fetchAllAggregators(routeKey, batchId, log, aggregators);
-  const gapQuotes = await gapFill(routeKey, bridgesSeen, batchId);
+  const gapQuotes = skipGapFill ? [] : await gapFill(routeKey, bridgesSeen, batchId);
   const allQuotes = [...aggQuotes, ...gapQuotes];
 
   const withBatchId = allQuotes.map((q) => ({ ...q, batchId }));
