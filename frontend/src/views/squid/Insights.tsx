@@ -6,8 +6,8 @@
      · /api/bridges/health      → aggregator performance rail + top-agg KPI
      · /api/opportunities       → highest-spread corridors
    ════════════════════════════════════════════════════════════════════════ */
-import { useState, useEffect, useMemo } from 'react';
-import { fetchMatrix, fetchBridgeCoverage, fetchBridgeHealth, fetchOpportunities } from '../../api/client';
+import React, { useState, useEffect, useMemo } from 'react';
+import { fetchMatrix, fetchBridgeCoverage, fetchBridgeHealth, fetchOpportunities, fetchHealth } from '../../api/client';
 import type { BridgeCoverageItem, AggregatorHealth, Opportunity } from '../../api/client';
 import { Card, SectionTitle, Pill, ChainChip, BridgeTag } from '../../squid/brand';
 import { bridgeMeta, aggMeta, fmtPct, fmtUsd } from '../../squid/meta';
@@ -29,10 +29,19 @@ export function Insights({ asset, tier, onOpenRoute }: InsightsProps) {
   const [bridges, setBridges] = useState<BridgeCoverageItem[]>([]);
   const [aggregators, setAggregators] = useState<AggregatorHealth[]>([]);
   const [opps, setOpps] = useState<Opportunity[]>([]);
+  const [health, setHealth] = useState<Awaited<ReturnType<typeof fetchHealth>> | null>(null);
 
-  // Matrix + opportunities: reload on asset/tier change and refresh every 60s.
-  // On error we keep the last good data (a transient backend hiccup must not blank
-  // the grid) — only the very first load can leave it empty → "Loading…".
+  // Local asset/tier for the right-column boards (aggregator + bridge leaderboard).
+  // null = "ALL" mode: fetches across all 9 combos with no filter.
+  // Starts in sync with the global header controls but can be changed independently.
+  const [localAsset, setLocalAsset] = useState<string | null>(asset);
+  const [localTier,  setLocalTier]  = useState<number | null>(tier);
+
+  // Keep local in sync when the user changes the global header selector.
+  useEffect(() => { setLocalAsset(asset); }, [asset]);
+  useEffect(() => { setLocalTier(tier);   }, [tier]);
+
+  // Matrix + opportunities: reload on global asset/tier change and refresh every 60s.
   useEffect(() => {
     let cancelled = false;
     const load = (): void => {
@@ -48,17 +57,29 @@ export function Insights({ asset, tier, onOpenRoute }: InsightsProps) {
     return () => { cancelled = true; clearInterval(id); };
   }, [asset, tier]);
 
-  // Bridge coverage + aggregator health: refresh every 60s so a single bad load
-  // (e.g. wins momentarily 0 right after a backend redeploy) never sticks for the
-  // whole session. Keep last good data on error.
+  // Bridge coverage + aggregator health: driven by LOCAL asset/tier combo so the
+  // 9-button selector controls them independently from the matrix.
   useEffect(() => {
     let cancelled = false;
     const load = (): void => {
-      fetchBridgeCoverage()
+      fetchBridgeCoverage(localAsset ?? undefined, localTier ?? undefined)
         .then((r) => { if (!cancelled) setBridges(r.bridges); })
         .catch(() => { /* keep last good data */ });
-      fetchBridgeHealth()
+      fetchBridgeHealth(localAsset ?? undefined, localTier ?? undefined)
         .then((r) => { if (!cancelled) setAggregators(r.aggregators); })
+        .catch(() => { /* keep last good data */ });
+    };
+    load();
+    const id = setInterval(load, 60_000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [localAsset, localTier]);
+
+  // Health: global corridor counts (across ALL 9 combos), refresh every 60s.
+  useEffect(() => {
+    let cancelled = false;
+    const load = (): void => {
+      fetchHealth()
+        .then((r) => { if (!cancelled) setHealth(r); })
         .catch(() => { /* keep last good data */ });
     };
     load();
@@ -69,15 +90,19 @@ export function Insights({ asset, tier, onOpenRoute }: InsightsProps) {
   // ── derive headline KPIs ──
   const kpis = useMemo(() => {
     const cells = matrix?.cells.filter((c) => c.state !== 'dead' && c.bestFeeBps != null) ?? [];
-    const corridors = (matrix?.stats.active ?? 0) + (matrix?.stats.singleBridge ?? 0) + (matrix?.stats.stale ?? 0);
+    // Use global total from health endpoint (unique src:dst pairs with ANY data, across all 9 combos).
+    // Falls back to per-combo matrix count until health data arrives.
+    const corridors = health?.db.totalPricedCorridors
+      ?? ((matrix?.stats.active ?? 0) + (matrix?.stats.singleBridge ?? 0) + (matrix?.stats.stale ?? 0));
+    const zeroCoverage = health?.db.zeroCoverageCorridors ?? (matrix?.stats.dead ?? 0);
     const avgFee = cells.length ? cells.reduce((s, c) => s + (c.bestFeeBps ?? 0), 0) / cells.length : 0;
     const bridgeBoard = [...bridges].sort((a, b) => b.wins - a.wins);
     const topBridge = bridgeBoard[0] ?? null;
     // Sort by route wins (the meaningful metric); fall back to successRate
     const aggBoard = [...aggregators].sort((a, b) => (b.wins ?? 0) - (a.wins ?? 0) || b.successRate - a.successRate);
     const topAgg = aggBoard[0] ?? null;
-    return { corridors, avgFee, topBridge, topAgg, bridgeBoard, aggBoard };
-  }, [matrix, bridges, aggregators]);
+    return { corridors, zeroCoverage, avgFee, topBridge, topAgg, bridgeBoard, aggBoard };
+  }, [matrix, health, bridges, aggregators]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -93,14 +118,14 @@ export function Insights({ asset, tier, onOpenRoute }: InsightsProps) {
             </div>
             <h1 className="t-h1" style={{ marginBottom: 6 }}>Who wins every route,<br />across every bridge.</h1>
             <p className="t-body" style={{ maxWidth: 380 }}>
-              Real-time best-execution intelligence over {kpis.corridors} live corridors,
-              {' '}{kpis.bridgeBoard.length > 0 ? kpis.bridgeBoard.length : '…'} bridges
+              Real-time best-execution intelligence over {kpis.corridors.toLocaleString()} priced corridors
+              {' '}across {kpis.bridgeBoard.length > 0 ? kpis.bridgeBoard.length : '…'} bridges
               {' '}and {kpis.aggBoard.length > 0 ? kpis.aggBoard.length : '…'} aggregators.
             </p>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(140px, 1fr))', gap: 12, flex: '1 1 360px' }}>
-            <HeroStat label="Priced corridors" value={String(kpis.corridors)} accent="var(--good)"
-              sub={`${matrix?.stats.dead ?? 0} with no live route`} />
+            <HeroStat label="Priced corridors" value={kpis.corridors.toLocaleString()} accent="var(--good)"
+              sub={`${kpis.zeroCoverage.toLocaleString()} of 3,080 with no data`} />
             <HeroStat label="Avg best fee" value={fmtPct(kpis.avgFee)} accent="var(--squid-lime)"
               sub="across all live corridors" />
             <HeroStat label="Top aggregator" value={kpis.topAgg ? aggMeta(kpis.topAgg.id).name : '—'} accent="var(--squid-lavender)"
@@ -123,6 +148,17 @@ export function Insights({ asset, tier, onOpenRoute }: InsightsProps) {
         </Card>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* ─── 9-combo selector: 3 assets × 3 tiers ─── */}
+          <Card pad={14}>
+            <div className="t-mono-xs" style={{ color: 'var(--fg-4)', marginBottom: 10, letterSpacing: '0.06em' }}>
+              FILTER · AGGREGATOR &amp; BRIDGE DATA
+            </div>
+            <ComboSelector9
+              asset={localAsset}
+              tier={localTier}
+              onChange={(a, t) => { setLocalAsset(a); setLocalTier(t); }}
+            />
+          </Card>
           <Card pad={18}>
             <SectionTitle accent="var(--squid-lavender)" sub="routes where this aggregator found the best price">Aggregator performance</SectionTitle>
             {kpis.aggBoard.length
@@ -271,6 +307,113 @@ function AggregatorBoard({ rows }: { rows: AggregatorHealth[] }) {
       <div className="t-mono-xs" style={{ color: 'var(--fg-4)', marginTop: 2, display: 'flex', justifyContent: 'space-between' }}>
         <span>aggregator</span>
         <span>routes won · share</span>
+      </div>
+    </div>
+  );
+}
+
+/* ─── 9-button combo selector: 3 assets (rows) × 3 tiers (columns) ─── */
+const COMBO_ASSETS = [
+  { k: 'USDC',  l: 'USDC',   color: '#836EF9' },  // squid lavender
+  { k: 'USDT',  l: 'USDT',   color: '#26A17B' },  // tether green
+  { k: 'ETH',   l: 'Native', color: '#E6FA36' },  // squid lime
+] as const;
+
+const COMBO_TIERS = [
+  { k: 50,    l: '$50'  },
+  { k: 1000,  l: '$1K'  },
+  { k: 50000, l: '$50K' },
+] as const;
+
+function ComboSelector9({
+  asset, tier, onChange,
+}: {
+  asset: string | null;
+  tier: number | null;
+  onChange: (asset: string | null, tier: number | null) => void;
+}) {
+  const isAll = asset === null && tier === null;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {/* ALL toggle */}
+      <button
+        onClick={() => onChange(null, null)}
+        style={{
+          padding: '6px 0',
+          borderRadius: 6,
+          border: `1px solid ${isAll ? 'var(--fg-2)' : 'var(--line)'}`,
+          background: isAll ? 'rgba(255,255,255,0.07)' : 'var(--bg-3)',
+          color: isAll ? 'var(--fg-1)' : 'var(--fg-4)',
+          cursor: 'pointer',
+          fontFamily: 'var(--font-mono)',
+          fontWeight: isAll ? 700 : 500,
+          fontSize: 11,
+          letterSpacing: '0.06em',
+          transition: 'all .1s',
+          boxShadow: isAll ? '0 0 0 1px rgba(255,255,255,0.1)' : 'none',
+        }}
+      >
+        ALL COMBOS
+      </button>
+
+      <div className="t-mono-xs" style={{ color: 'var(--fg-4)', textAlign: 'center', fontSize: 10, letterSpacing: '0.05em' }}>
+        OR SELECT ONE
+      </div>
+
+      {/* 3×3 grid */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '46px repeat(3, 1fr)',
+        gap: 4,
+        alignItems: 'center',
+        opacity: isAll ? 0.45 : 1,
+        transition: 'opacity .15s',
+      }}>
+        {/* header row */}
+        <div /> {/* top-left spacer */}
+        {COMBO_TIERS.map((t) => (
+          <div key={t.k} className="t-mono-xs" style={{
+            textAlign: 'center', color: 'var(--fg-4)', paddingBottom: 2,
+          }}>{t.l}</div>
+        ))}
+
+        {/* asset rows */}
+        {COMBO_ASSETS.map((a) => (
+          <React.Fragment key={a.k}>
+            {/* row label */}
+            <div className="t-mono-xs" style={{
+              color: a.color, fontWeight: 600, paddingRight: 4,
+              whiteSpace: 'nowrap', textAlign: 'right',
+            }}>{a.l}</div>
+
+            {/* tier buttons */}
+            {COMBO_TIERS.map((t) => {
+              const selected = asset === a.k && tier === t.k;
+              return (
+                <button
+                  key={t.k}
+                  onClick={() => onChange(a.k, t.k)}
+                  style={{
+                    padding: '5px 0',
+                    borderRadius: 6,
+                    border: `1px solid ${selected ? a.color : 'var(--line)'}`,
+                    background: selected ? `${a.color}22` : 'var(--bg-3)',
+                    color: selected ? a.color : 'var(--fg-4)',
+                    cursor: 'pointer',
+                    fontFamily: 'var(--font-mono)',
+                    fontWeight: selected ? 700 : 500,
+                    fontSize: 11,
+                    textAlign: 'center' as const,
+                    transition: 'all .1s',
+                    boxShadow: selected ? `0 0 0 1px ${a.color}44` : 'none',
+                  }}
+                >
+                  {t.l}
+                </button>
+              );
+            })}
+          </React.Fragment>
+        ))}
       </div>
     </div>
   );

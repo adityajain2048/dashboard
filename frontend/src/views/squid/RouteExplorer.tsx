@@ -161,6 +161,7 @@ export function RouteExplorer({ asset, tier, route }: RouteExplorerProps) {
             quotes={quotes3h}
             asset={asset}
             dst={dst}
+            tier={tier}
             refreshIn={refreshIn}
           />
           <QuoteSection
@@ -169,6 +170,7 @@ export function RouteExplorer({ asset, tier, route }: RouteExplorerProps) {
             quotes={quotes24h}
             asset={asset}
             dst={dst}
+            tier={tier}
           />
         </>
       )}
@@ -216,12 +218,14 @@ export function RouteExplorer({ asset, tier, route }: RouteExplorerProps) {
 
 /** One ranked quote table for a time window. Spread is recomputed relative to
  *  THIS window's best so each section is internally consistent. */
-function QuoteSection({ title, sub, quotes, asset, dst, refreshIn }: {
+function QuoteSection({ title, sub, quotes, asset, dst, tier, refreshIn }: {
   title: string;
   sub: string;
   quotes: QuoteRow[];
   asset: string;
   dst: string;
+  /** Tier amount in USD (50/1000/50000) — used as canonical fee reference. */
+  tier: number;
   refreshIn?: number;
 }) {
   const bridgeSourceCount = useMemo(() => {
@@ -250,12 +254,17 @@ function QuoteSection({ title, sub, quotes, asset, dst, refreshIn }: {
         <Empty label="No quotes in this window." />
       ) : (
         quotes.map((q, i) => {
-          const totalFee = parseFloat(q.totalFeeUsd);
-          const gas = parseFloat(q.gasCostUsd);
-          const proto = Math.max(totalFee - gas, 0);
-          const gasPct = (gas / (totalFee || 1)) * 100;
-          const srcCount = bridgeSourceCount.get(q.bridge)?.size ?? 1;
           const out = parseFloat(q.outputUsd);
+          // Canonical fee: what the user paid = tier_amount − what_they_received.
+          // Using tier (not the stored totalFeeUsd) avoids aggregator price-discrepancy
+          // inflation (e.g. LI.FI pricing input at $1,026 when our tier is $1,000).
+          const effectiveFeeUsd = Math.max(0, tier - out);
+          const effectiveFeeBps = tier > 0 ? Math.round((10000 * effectiveFeeUsd) / tier) : 0;
+          // Gas split: keep aggregator gas; derive protocol = effective_fee − gas.
+          const gas = parseFloat(q.gasCostUsd);
+          const proto = Math.max(effectiveFeeUsd - gas, 0);
+          const gasPct = effectiveFeeUsd > 0 ? (gas / effectiveFeeUsd) * 100 : 0;
+          const srcCount = bridgeSourceCount.get(q.bridge)?.size ?? 1;
           const spreadBps = bestOut > 0 ? Math.max(0, Math.round((10000 * (bestOut - out)) / bestOut)) : 0;
           const spreadColor = spreadBps < 30 ? 'var(--good)' : spreadBps < 100 ? 'var(--warn)' : 'var(--bad)';
           return (
@@ -274,11 +283,14 @@ function QuoteSection({ title, sub, quotes, asset, dst, refreshIn }: {
                 <span style={{ fontFamily: 'var(--font-ui)', fontWeight: 500, fontSize: 12, color: 'var(--fg-2)' }}>{aggMeta(q.source).name}</span>
               </span>
               <div style={{ textAlign: 'right' }}>
-                <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 14, color: i === 0 ? 'var(--squid-lime)' : 'var(--fg-1)' }}>{fmtUsd(parseFloat(q.outputUsd))}</div>
+                <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 14, color: i === 0 ? 'var(--squid-lime)' : 'var(--fg-1)' }}>{fmtUsd(out)}</div>
                 <div className="t-mono-xs" style={{ color: 'var(--fg-4)', marginTop: 2 }}>{formatTokenAmount(q.outputAmount, asset, dst)} {getReceiveSymbol(asset, dst)}</div>
               </div>
               <div style={{ textAlign: 'right' }}>
-                <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12, color: 'var(--fg-2)' }}>{fmtUsd(totalFee)} <span style={{ color: 'var(--fg-4)', fontSize: 10 }}>{q.totalFeeBps}bps</span></div>
+                <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12, color: 'var(--fg-2)' }}>
+                  {effectiveFeeUsd > 0 ? fmtUsd(effectiveFeeUsd) : <span style={{ color: 'var(--good)' }}>+{fmtUsd(out - tier)}</span>}
+                  {' '}<span style={{ color: 'var(--fg-4)', fontSize: 10 }}>{effectiveFeeBps}bps</span>
+                </div>
                 <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
                   <div style={{ width: 60, height: 5, borderRadius: 3, background: 'var(--bg-3)', overflow: 'hidden', display: 'flex' }}>
                     <div style={{ width: `${gasPct}%`, background: 'var(--fg-4)' }} title={`gas ${fmtUsd(gas)}`} />
@@ -364,7 +376,9 @@ function ChainSelect({ label, value, exclude, onChange, open, setOpen }: {
                 const ch = chainMeta(id);
                 const disabled = id === exclude;
                 return (
-                  <div key={id} onClick={() => { if (!disabled) { onChange(id); setOpen(false); } }}
+                  <div key={id}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={() => { if (!disabled) { onChange(id); setOpen(false); } }}
                     className="sq-row" style={{
                       display: 'flex', alignItems: 'center', gap: 9, padding: '7px 9px', borderRadius: 6,
                       cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.3 : 1,

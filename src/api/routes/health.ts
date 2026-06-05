@@ -31,6 +31,35 @@ export default async function healthRoutes(
       if (!lastRefresh || r.last_ts > lastRefresh) lastRefresh = r.last_ts;
     }
 
+    // Per-combo priced corridor counts — all 9 asset×tier combinations.
+    // "priced" = distinct (src,dst) pairs that have at least one quote at that combo.
+    // Also compute total unique corridors (any asset/tier) vs total possible (56×55).
+    interface ComboRow { asset: string; amount_tier: string; priced: string }
+    interface TotalRow  { unique_corridors: string }
+    const [comboRes, totalRes] = dbConnected
+      ? await Promise.all([
+          pool.query<ComboRow>(
+            `SELECT asset, amount_tier::text,
+                    COUNT(DISTINCT src_chain||':'||dst_chain)::text AS priced
+             FROM route_latest
+             GROUP BY asset, amount_tier
+             ORDER BY asset, amount_tier`
+          ),
+          pool.query<TotalRow>(
+            `SELECT COUNT(DISTINCT src_chain||':'||dst_chain)::text AS unique_corridors
+             FROM route_latest`
+          ),
+        ])
+      : [{ rows: [] as ComboRow[] }, { rows: [{ unique_corridors: '0' }] as TotalRow[] }];
+
+    const perCombo = comboRes.rows.map((r) => ({
+      asset: r.asset,
+      tier: parseInt(r.amount_tier, 10),
+      priced: parseInt(r.priced, 10),
+    }));
+    const totalPricedCorridors = parseInt(totalRes.rows[0]?.unique_corridors ?? '0', 10);
+    const TOTAL_POSSIBLE = 56 * 55; // 3080
+
     let status: 'ok' | 'degraded' | 'down' = 'down';
     if (dbConnected) {
       status = lastRefresh && Date.now() - lastRefresh.getTime() < STALE_THRESHOLD_MS
@@ -52,6 +81,10 @@ export default async function healthRoutes(
         oldestQuote: oldestQuote?.toISOString() ?? null,
         aggregatorCount,
         bridgeCount,
+        totalPricedCorridors,
+        totalPossibleCorridors: TOTAL_POSSIBLE,
+        zeroCoverageCorridors: TOTAL_POSSIBLE - totalPricedCorridors,
+        perCombo,
       },
     });
   });

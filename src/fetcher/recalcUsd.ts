@@ -56,8 +56,13 @@ function recalcSingleQuoteUsd(q: NormalizedQuote): NormalizedQuote | null {
     dstToken.address !== 'native';
 
   if (isCrossAsset) {
-    // Use aggregator-provided USD values directly; only recompute fee bps from those.
-    const inUsd = Number(q.inputUsd);
+    // For cross-asset routes (e.g. EVM → Solana wETH via Mayan, Cosmos ↔ EVM),
+    // the aggregator's fromAmountUSD can differ from our tier by 1–3% due to price
+    // feed differences. Using the aggregator's inputUsd inflates the apparent fee
+    // (e.g. shows $24 / 241bps when the user actually gains $2).
+    // Fix: use q.amountTier as the canonical "what the user spent" reference.
+    // This ensures fee = max(0, tier − outputUsd), which is the true user-facing cost.
+    const inUsd = q.amountTier;  // e.g. 1000 for $1K tier — always precise
     const outUsd = Number(q.outputUsd);
     if (inUsd <= 0) return q; // can't compute, keep as-is
     // Cross-asset sanity: no bridge gives 50% more than you put in.
@@ -82,15 +87,17 @@ function recalcSingleQuoteUsd(q: NormalizedQuote): NormalizedQuote | null {
       );
       return null;
     }
-    return { ...q, totalFeeUsd: totalFeeUsd.toFixed(8), totalFeeBps, protocolFeeBps };
+    // Override inputUsd with the canonical tier amount for consistency with fee fields.
+    return { ...q, inputUsd: inUsd.toFixed(8), totalFeeUsd: totalFeeUsd.toFixed(8), totalFeeBps, protocolFeeBps };
   }
 
   // Same-asset route (USDC→USDC, ETH→ETH, native→same-native):
-  // Recalculate USD from raw token amounts using CoinGecko prices for consistency.
-  const inputUsd = computeAmountUsd(q.inputAmount, srcToken.decimals, q.asset, q.srcChain);
+  // Recalculate output USD from raw token amount using CoinGecko prices for consistency.
+  // For input, use q.amountTier as the canonical reference — it is what the user is
+  // spending (e.g. $1,000) and avoids tiny round-trip drift in the price calculation.
   const outputUsd = computeAmountUsd(q.outputAmount, dstToken.decimals, q.asset, q.dstChain);
 
-  const inUsd = Number(inputUsd);
+  const inUsd = q.amountTier;  // canonical USD cost — always precise
   const outUsd = Number(outputUsd);
 
   // Sanity: a bridge cannot return more USD than it receives.
@@ -107,7 +114,7 @@ function recalcSingleQuoteUsd(q: NormalizedQuote): NormalizedQuote | null {
   // Keep the original gasUsd from the aggregator (we don't have a better source for gas)
   const gasUsd = Number(q.gasCostUsd);
 
-  // Recalculate fee fields from corrected USD values
+  // Recalculate fee fields: fee = what you spent − what you received
   const totalFeeUsd = Math.max(0, inUsd - outUsd);
   const protocolFeeUsd = Math.max(0, totalFeeUsd - gasUsd);
   const totalFeeBps = inUsd > 0 ? Math.round((10000 * totalFeeUsd) / inUsd) : 0;
@@ -125,7 +132,7 @@ function recalcSingleQuoteUsd(q: NormalizedQuote): NormalizedQuote | null {
 
   return {
     ...q,
-    inputUsd,
+    inputUsd: inUsd.toFixed(8),
     outputUsd,
     totalFeeUsd: totalFeeUsd.toFixed(8),
     totalFeeBps,

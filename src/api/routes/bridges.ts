@@ -96,18 +96,44 @@ export default async function bridgesRoutes(
       return reply.send({ bridge: canonical, corridors: rows });
     }
 
+    // Optional asset / tier filter — lets the UI show per-combo leaderboard data
+    const VALID_ASSETS = new Set(['ETH', 'USDC', 'USDT']);
+    const VALID_TIERS  = new Set([50, 1000, 50000]);
+    const assetFilter: string | null = VALID_ASSETS.has((req.query as Record<string,string>).asset)
+      ? (req.query as Record<string,string>).asset : null;
+    const tierRaw = parseInt((req.query as Record<string,string>).tier, 10);
+    const tierFilter: number | null = VALID_TIERS.has(tierRaw) ? tierRaw : null;
+
+    /** Build independent params + WHERE additions for a single query. */
+    function filterFor(tableAlias: string | null): { where: string; params: (string | number)[] } {
+      const params: (string | number)[] = [];
+      const parts: string[] = [];
+      const col = (c: string) => tableAlias ? `${tableAlias}.${c}` : c;
+      if (assetFilter) { params.push(assetFilter); parts.push(`${col('asset')} = $${params.length}`); }
+      if (tierFilter != null) { params.push(tierFilter); parts.push(`${col('amount_tier')} = $${params.length}`); }
+      return { where: parts.length ? 'AND ' + parts.join(' AND ') : '', params };
+    }
+
+    const rlF  = filterFor(null);   // route_latest (no alias in coverage query)
+    const rsF  = filterFor(null);   // route_status (no alias)
+
     // Overview mode — 4 queries in parallel
     const [coverageRes, winsRes, feeRes, totalRes] = await Promise.all([
       query<CoverageRow>(
         `SELECT bridge, COUNT(DISTINCT src_chain || ':' || dst_chain) AS routes_covered
-         FROM route_latest GROUP BY bridge ORDER BY routes_covered DESC`
+         FROM route_latest
+         WHERE 1=1 ${rlF.where}
+         GROUP BY bridge ORDER BY routes_covered DESC`,
+        rlF.params
       ),
       query<WinRow>(
         `SELECT best_bridge AS bridge, COUNT(*) AS wins
          FROM route_status
          WHERE state IN ('active', 'single-bridge') AND best_bridge IS NOT NULL
            AND last_seen > NOW() - INTERVAL '${FRESH_MINUTES} minutes'
-         GROUP BY best_bridge`
+           ${rsF.where}
+         GROUP BY best_bridge`,
+        rsF.params
       ),
       query<FeeRow>(
         `SELECT best_bridge AS bridge, AVG(best_fee_bps) AS avg_fee_bps
@@ -115,12 +141,16 @@ export default async function bridgesRoutes(
          WHERE state IN ('active', 'single-bridge') AND best_bridge IS NOT NULL
            AND best_fee_bps IS NOT NULL AND best_fee_bps >= 0
            AND last_seen > NOW() - INTERVAL '${FRESH_MINUTES} minutes'
-         GROUP BY best_bridge`
+           ${rsF.where}
+         GROUP BY best_bridge`,
+        rsF.params
       ),
       query<TotalRow>(
         `SELECT COUNT(*) AS total FROM route_status
          WHERE state IN ('active', 'single-bridge')
-           AND last_seen > NOW() - INTERVAL '${FRESH_MINUTES} minutes'`
+           AND last_seen > NOW() - INTERVAL '${FRESH_MINUTES} minutes'
+           ${rsF.where}`,
+        rsF.params
       ),
     ]);
 
@@ -229,11 +259,46 @@ export default async function bridgesRoutes(
   });
 
   // ─── GET /bridges/health ───
-  app.get('/bridges/health', async (_req, reply) => {
+  app.get('/bridges/health', async (req, reply) => {
+    // Optional asset / tier filter — same validation as /bridges/coverage
+    const VALID_ASSETS_H = new Set(['ETH', 'USDC', 'USDT']);
+    const VALID_TIERS_H  = new Set([50, 1000, 50000]);
+    const assetFilterH: string | null = VALID_ASSETS_H.has((req.query as Record<string,string>).asset)
+      ? (req.query as Record<string,string>).asset : null;
+    const tierRawH = parseInt((req.query as Record<string,string>).tier, 10);
+    const tierFilterH: number | null = VALID_TIERS_H.has(tierRawH) ? tierRawH : null;
+
+    // wins query: filter route_latest (rl) and route_status (rs) by asset/tier
+    const winsParams: (string | number)[] = [];
+    const winsRlParts: string[] = [];
+    const winsRsParts: string[] = [];
+    if (assetFilterH) {
+      winsParams.push(assetFilterH);
+      winsRlParts.push(`rl.asset = $${winsParams.length}`);
+      // rs already joined on asset — add redundant filter to allow index use
+      winsRsParts.push(`rs.asset = $${winsParams.length}`);
+    }
+    if (tierFilterH != null) {
+      winsParams.push(tierFilterH);
+      winsRlParts.push(`rl.amount_tier = $${winsParams.length}`);
+      winsRsParts.push(`rs.amount_tier = $${winsParams.length}`);
+    }
+    const winsRlWhere = winsRlParts.length ? 'AND ' + winsRlParts.join(' AND ') : '';
+    const winsRsWhere = winsRsParts.length ? 'AND ' + winsRsParts.join(' AND ') : '';
+
+    // liveness query: filter route_latest by asset/tier
+    const livParams: (string | number)[] = [];
+    const livParts: string[] = [];
+    if (assetFilterH) { livParams.push(assetFilterH); livParts.push(`asset = $${livParams.length}`); }
+    if (tierFilterH != null) { livParams.push(tierFilterH); livParts.push(`amount_tier = $${livParams.length}`); }
+    const livWhere = livParts.length ? 'WHERE ' + livParts.join(' AND ') : '';
+
     const [aggRes, livenessRes, winsRes] = await Promise.all([
       // Only the 5 real aggregators — exclude 'direct' (gap-fill bridge calls).
       // total_count excludes 'skipped' rows (adaptive-skip entries are intentional
       // non-calls, not failures) so the success-rate denominator stays accurate.
+      // fetch_log has no asset/tier columns — success rate is a global API health
+      // metric and is intentionally not filtered by asset/tier.
       query<AggHealthRow>(
         `SELECT source,
            COUNT(*) FILTER (WHERE status = 'success')  AS success_count,
@@ -253,7 +318,9 @@ export default async function bridgesRoutes(
            MAX(ts) AS last_seen,
            COUNT(DISTINCT src_chain || ':' || dst_chain) AS corridors
          FROM route_latest
-         GROUP BY bridge`
+         ${livWhere}
+         GROUP BY bridge`,
+        livParams
       ),
       // For each live route, among aggregator-sourced quotes only, find the one
       // with the highest output_usd and credit that aggregator with a win.
@@ -272,11 +339,13 @@ export default async function bridgesRoutes(
              AND rs.amount_tier = rl.amount_tier
            WHERE rs.state IN ('active', 'single-bridge')
              AND rs.last_seen > NOW() - INTERVAL '${FRESH_MINUTES} minutes'
+             ${winsRsWhere}
              AND rl.source IN ('lifi', 'rango', 'bungee', 'rubic', 'squid')
+             ${winsRlWhere}
              AND rl.output_usd::numeric > 0.01
              AND (rl.total_fee_bps IS NULL OR rl.total_fee_bps <= 1000)
              AND NOT (rl.input_usd::numeric > 0
-                      AND rl.output_usd::numeric > rl.input_usd::numeric * 2
+                      AND rl.output_usd::numeric > rl.input_usd::numeric * 1.5
                       AND rl.output_usd::numeric > 10)
            ORDER BY rl.src_chain, rl.dst_chain, rl.asset, rl.amount_tier,
                     rl.output_usd::numeric DESC
@@ -284,7 +353,8 @@ export default async function bridgesRoutes(
          SELECT source, COUNT(*) AS wins
          FROM best_per_route
          GROUP BY source
-         ORDER BY wins DESC`
+         ORDER BY wins DESC`,
+        winsParams
       ),
     ]);
 

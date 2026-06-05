@@ -36,6 +36,12 @@ export async function fetchMatrix(
   return res.json();
 }
 
+export interface PerComboStat {
+  asset: string;
+  tier: number;
+  priced: number;
+}
+
 export async function fetchHealth(): Promise<{
   status: string;
   uptime: number;
@@ -45,6 +51,10 @@ export async function fetchHealth(): Promise<{
     oldestQuote: string | null;
     aggregatorCount: number;
     bridgeCount: number;
+    totalPricedCorridors: number;
+    totalPossibleCorridors: number;
+    zeroCoverageCorridors: number;
+    perCombo: PerComboStat[];
   };
 }> {
   const res = await fetch(`${BASE}/api/health`, { cache: 'no-store' });
@@ -59,12 +69,16 @@ export interface BridgeCoverageItem {
   supportedChains: string[]; maxRoutes: number; chainCoveragePct: number;
 }
 
-export async function fetchBridgeCoverage(): Promise<{
+export async function fetchBridgeCoverage(asset?: string, tier?: number): Promise<{
   bridges: BridgeCoverageItem[];
   totalActiveRoutes: number;
   totalTrackedBridges: number;
 }> {
-  const res = await fetch(`${BASE}/api/bridges/coverage`);
+  const params = new URLSearchParams();
+  if (asset) params.set('asset', asset);
+  if (tier != null) params.set('tier', String(tier));
+  const qs = params.toString();
+  const res = await fetch(`${BASE}/api/bridges/coverage${qs ? '?' + qs : ''}`);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
@@ -90,11 +104,15 @@ export interface BridgeHealth {
   id: string; activeQuotes: number; corridors: number; lastSeen: string | null; isStale: boolean;
 }
 
-export async function fetchBridgeHealth(): Promise<{
+export async function fetchBridgeHealth(asset?: string, tier?: number): Promise<{
   aggregators: AggregatorHealth[];
   bridges: BridgeHealth[];
 }> {
-  const res = await fetch(`${BASE}/api/bridges/health`);
+  const params = new URLSearchParams();
+  if (asset) params.set('asset', asset);
+  if (tier != null) params.set('tier', String(tier));
+  const qs = params.toString();
+  const res = await fetch(`${BASE}/api/bridges/health${qs ? '?' + qs : ''}`);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
