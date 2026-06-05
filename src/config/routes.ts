@@ -23,14 +23,17 @@ const BITCOIN_ASSETS: readonly Asset[] = ['ETH'];
 const BERACHAIN_ASSETS: readonly Asset[] = ['ETH', 'USDC'];
 
 /**
- * Chains where the native token (ETH slot) has no meaningful bridging use case:
- * tiny market-cap tokens whose USD prices are unreliable across aggregators,
- * producing inflated/garbage output_usd values that the validity filter drops.
+ * Chains where the native token (ETH slot) should not be tracked:
+ * either no ETH exists on the chain, or aggregators systematically return
+ * inflated/garbage output_usd values that slip past validity filters.
  * Only USDC routes are generated for these chains.
  *
- * stargaze: STARS ~$0.002 — NFT chain, all native quotes show 10-20× inflation
+ * stargaze: STARS ~$0.002 — NFT chain, native quotes show 10-20× inflation
+ * sei:      SEI native — Squid prices SEI incorrectly, quotes arrive at ~1.98×
+ *           input (just under 2× filter), all 6 existing rows were bad
+ * noble:    USDC issuance chain — no ETH token on Noble (address = 'none')
  */
-const USDC_ONLY_CHAINS = new Set(['stargaze']);
+const USDC_ONLY_CHAINS = new Set(['stargaze', 'sei', 'noble']);
 
 /** Get assets for a corridor; applies per-chain restrictions. */
 function assetsForCorridor(src: string, dst: string): Asset[] {

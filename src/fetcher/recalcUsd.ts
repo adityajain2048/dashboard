@@ -60,13 +60,13 @@ function recalcSingleQuoteUsd(q: NormalizedQuote): NormalizedQuote | null {
     const inUsd = Number(q.inputUsd);
     const outUsd = Number(q.outputUsd);
     if (inUsd <= 0) return q; // can't compute, keep as-is
-    // Cross-asset sanity: no bridge turns $50 into $880. If outputUsd is more than
-    // 2× inputUsd (and a meaningful amount), the aggregator's price feed for the
-    // destination token is wrong (e.g. Squid mispricing STARS on Stargaze).
-    if (outUsd > inUsd * 2 && outUsd > 10) {
+    // Cross-asset sanity: no bridge gives 50% more than you put in.
+    // Threshold of 1.5× catches SEI-style inflation (ratio ~1.98 slipped under
+    // the old 2× threshold) while keeping legitimate routes (max seen: ~1.25×).
+    if (outUsd > inUsd * 1.5 && outUsd > 10) {
       logger.debug(
         { bridge: q.bridge, src: q.srcChain, dst: q.dstChain, asset: q.asset, inUsd, outUsd },
-        'Dropping cross-asset quote: outputUsd > 2× inputUsd (price-feed error)'
+        'Dropping cross-asset quote: outputUsd > 1.5× inputUsd (price-feed error)'
       );
       return null;
     }
