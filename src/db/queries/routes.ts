@@ -71,16 +71,17 @@ export function computeRouteStatus(
     return true;
   });
 
-  // ── Basic counts (all rows, including invalid — counts reflect DB reality) ─
-  const quoteCount = rows.length;
-  const bridgeCount = new Set(rows.map((r) => r.bridge)).size;
+  // ── Counts and freshness — driven by VALID rows only ─────────────────────
+  // Using validRows ensures matrix quoteCount/bridgeCount/state match what
+  // /api/quotes returns. A route whose only rows fail validity filters is
+  // treated as dead — not as single-bridge with phantom quotes.
+  const quoteCount = validRows.length;
+  const bridgeCount = new Set(validRows.map((r) => r.bridge)).size;
   const lastSeen = quoteCount > 0
-    ? rows.reduce((newest, r) => (r.ts > newest ? r.ts : newest), rows[0].ts)
+    ? validRows.reduce((newest, r) => (r.ts > newest ? r.ts : newest), validRows[0]!.ts)
     : null;
 
-  // ── State — driven by freshness of the most-recent quote ──────────────────
-  // bridgeCount uses ALL rows (fresh + stale): it reflects whether the route
-  // has ever had multiple bridges quoting (competition vs monopoly).
+  // ── State — driven by freshness of the most-recent VALID quote ────────────
   let state: ComputedRouteStatus['state'];
   if (quoteCount === 0) {
     state = 'dead';

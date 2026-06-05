@@ -22,10 +22,21 @@ const BITCOIN_ASSETS: readonly Asset[] = ['ETH'];
 /** Berachain does not have USDT — skip to avoid dead routes. */
 const BERACHAIN_ASSETS: readonly Asset[] = ['ETH', 'USDC'];
 
+/**
+ * Chains where the native token (ETH slot) has no meaningful bridging use case:
+ * tiny market-cap tokens whose USD prices are unreliable across aggregators,
+ * producing inflated/garbage output_usd values that the validity filter drops.
+ * Only USDC routes are generated for these chains.
+ *
+ * stargaze: STARS ~$0.002 — NFT chain, all native quotes show 10-20× inflation
+ */
+const USDC_ONLY_CHAINS = new Set(['stargaze']);
+
 /** Get assets for a corridor; applies per-chain restrictions. */
 function assetsForCorridor(src: string, dst: string): Asset[] {
   if (src === 'bitcoin' || dst === 'bitcoin') return [...BITCOIN_ASSETS];
   if (src === 'berachain' || dst === 'berachain') return [...BERACHAIN_ASSETS];
+  if (USDC_ONLY_CHAINS.has(src) || USDC_ONLY_CHAINS.has(dst)) return ['USDC'];
   return [...ALL_ASSETS];
 }
 
