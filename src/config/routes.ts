@@ -31,9 +31,11 @@ const BERACHAIN_ASSETS: readonly Asset[] = ['ETH', 'USDC'];
  * stargaze: STARS ~$0.002 — NFT chain, native quotes show 10-20× inflation
  * sei:      SEI native — Squid prices SEI incorrectly, quotes arrive at ~1.98×
  *           input (just under 2× filter), all 6 existing rows were bad
+ * fantom:   FTM native — all ETH routes show consistent 1.07-1.25× inflation
+ *           across both $50 and $1K tiers; systematic Squid FTM mispricing
  * noble:    USDC issuance chain — no ETH token on Noble (address = 'none')
  */
-const USDC_ONLY_CHAINS = new Set(['stargaze', 'sei', 'noble']);
+const USDC_ONLY_CHAINS = new Set(['stargaze', 'sei', 'fantom', 'noble']);
 
 /** Get assets for a corridor; applies per-chain restrictions. */
 function assetsForCorridor(src: string, dst: string): Asset[] {
