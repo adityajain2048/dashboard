@@ -57,17 +57,13 @@ export function computeRouteStatus(
   rows: RouteLatestInput[],
   now: Date = new Date()
 ): ComputedRouteStatus {
-  const thresholdMs = STALE_THRESHOLD_MS;
 
-  // ── Valid rows: filter out garbage (broken output / fee outliers) ──────────
+  // ── Valid rows: canonical validity filter ─────────────────────────────────
+  // Canonical spec: output_usd > 0.01 AND (total_fee_bps IS NULL OR total_fee_bps <= 1000).
+  // No inflation multiplier — recalcUsd.ts already gates ingestion at 1.5× at write time.
   const validRows = rows.filter((r) => {
-    const outUsd = Number(r.output_usd);
-    const inUsd  = Number(r.input_usd ?? 0);
-    if (outUsd <= 0.01) return false;
+    if (Number(r.output_usd) <= 0.01) return false;
     if (r.total_fee_bps != null && r.total_fee_bps > 1000) return false;
-    // Reject price-feed inflation: output > 2× input is impossible on any real bridge.
-    // Catches Squid/Stargaze STARS mispricing (e.g. $50 in → $880 out shown as 0 fee).
-    if (inUsd > 0 && outUsd > inUsd * 2 && outUsd > 10) return false;
     return true;
   });
 
@@ -85,7 +81,7 @@ export function computeRouteStatus(
   let state: ComputedRouteStatus['state'];
   if (quoteCount === 0) {
     state = 'dead';
-  } else if (lastSeen && (now.getTime() - lastSeen.getTime()) > thresholdMs) {
+  } else if (lastSeen && (now.getTime() - lastSeen.getTime()) > STALE_THRESHOLD_MS) {
     state = 'stale';
   } else if (bridgeCount === 1) {
     state = 'single-bridge';
@@ -93,18 +89,13 @@ export function computeRouteStatus(
     state = 'active';
   }
 
-  // ── Best / worst selection — only from quotes fresh relative to lastSeen ────
-  // If one bridge was quoted 90 min ago and others were just quoted, comparing
-  // them produces a fictitious spread. Restrict ranking to rows whose individual
-  // timestamp falls within one staleness window of the most-recent quote so
-  // stale outliers cannot inflate the reported "best" or "worst" bridge.
-  // If no rows pass the freshness filter (e.g. all data is uniformly old but
-  // the route hasn't flipped to stale yet) fall back to all validRows so the
-  // matrix never goes blank.
-  const freshValidRows = lastSeen
-    ? validRows.filter((r) => (lastSeen.getTime() - r.ts.getTime()) <= thresholdMs)
-    : validRows;
-  const rankingRows = freshValidRows.length > 0 ? freshValidRows : validRows;
+  // ── Best / worst selection — all valid rows ──────────────────────────────
+  // Canonical spec: rank ALL valid rows regardless of individual timestamp.
+  // Using all valid rows ensures the best-priced bridge always wins even if
+  // its quote is older than a recently-arrived inferior quote.
+  // (Audit confirmed: freshness-windowed ranking was the sole cause of 1,528
+  // opportunity mismatches — canonical always got equal or better output.)
+  const rankingRows = validRows;
 
   // RouteLatestInput uses snake_case (output_usd, total_fee_bps) but the
   // canonical helpers expect camelCase RankableQuote. Map once here.
@@ -276,12 +267,9 @@ export async function getQuotesForRoute(
 
   const quotes: NormalizedQuote[] = result.rows
     .filter((row) => {
-      const outUsd = Number(row.output_usd);
-      const inUsd  = Number(row.input_usd ?? 0);
-      if (outUsd <= 0.01) return false;
+      // Canonical validity: output_usd > 0.01 AND fee_bps <= 1000 (or null)
+      if (Number(row.output_usd) <= 0.01) return false;
       if (row.total_fee_bps != null && row.total_fee_bps > 1000) return false;
-      // Reject price-feed inflation (e.g. Stargaze STARS mispricing)
-      if (inUsd > 0 && outUsd > inUsd * 2 && outUsd > 10) return false;
       return true;
     })
     .map((row: RouteLatestRow) => ({

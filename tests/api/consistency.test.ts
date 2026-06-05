@@ -162,6 +162,70 @@ describe('Regression C — polygon→bsc USDC $50K', () => {
   });
 });
 
+// ─── Canonical agreement: computeRouteStatus must match reRankQuotes ─────────
+// These tests verify that the two canonical ranking paths always agree on the
+// best bridge, catching any future divergence between computeRouteStatus and
+// the reRankQuotes helper used by /api/quotes.
+
+describe('Canonical agreement — computeRouteStatus vs reRankQuotes', () => {
+  const fixtures: Array<{ name: string; rows: RouteLatestInput[] }> = [
+    {
+      name: 'Regression A — ethereum→arbitrum USDC $1K',
+      rows: [
+        row('symbiosis', 'bungee', '1001.25264400', 0),
+        row('axelar',    'squid',  '999.96285600',  0),
+      ],
+    },
+    {
+      name: 'Regression C — polygon→bsc USDC $50K',
+      rows: [
+        row('cbridge',  'bungee', '49997.98504000', 0, 60_000, '50000'),
+        row('across',   'bungee', '49987.90762800', 2, 60_000, '50000'),
+        row('debridge', 'direct', '49960.00800046', 8, 60_000, '50000'),
+        row('axelar',   'squid',  '49954.41385768', 9, 60_000, '50000'),
+      ],
+    },
+    {
+      name: 'Regression G — old bridge with better output (production mismatch pattern)',
+      rows: [
+        row('polymer', 'squid',  '49875', 25, 60_000,                   '50000'),
+        row('relay',   'direct', '49995',  1, STALE_THRESHOLD_MS * 2,   '50000'),
+      ],
+    },
+  ];
+
+  it.each(fixtures)('$name: computeRouteStatus.bestBridge === reRankQuotes[0].bridge', ({ rows }) => {
+    const { bestBridge } = computeRouteStatus(rows);
+    const ranked = reRankQuotes(rows.map((r) => ({
+      bridge: r.bridge,
+      source: r.source,
+      outputUsd: r.output_usd,
+      totalFeeBps: r.total_fee_bps,
+    })));
+    expect(bestBridge).toBe(ranked[0]!.bridge);
+  });
+
+  it.each(fixtures)('$name: bestOutputUsd matches highest reRankQuotes output', ({ rows }) => {
+    const { bestOutputUsd } = computeRouteStatus(rows);
+    const ranked = reRankQuotes(rows.map((r) => ({
+      bridge: r.bridge,
+      source: r.source,
+      outputUsd: r.output_usd,
+      totalFeeBps: r.total_fee_bps,
+    })));
+    expect(Number(bestOutputUsd)).toBeCloseTo(Number(ranked[0]!.outputUsd), 4);
+  });
+
+  it.each(fixtures)('$name: spreadBps matches canonical formula', ({ rows }) => {
+    const { spreadBps, bestOutputUsd, worstOutputUsd, state } = computeRouteStatus(rows);
+    if (state === 'stale' || bestOutputUsd == null || worstOutputUsd == null) return;
+    const expected = Math.max(0, Math.round(
+      (10000 * (Number(bestOutputUsd) - Number(worstOutputUsd))) / Number(bestOutputUsd)
+    ));
+    expect(spreadBps).toBe(expected);
+  });
+});
+
 // ─── No negative bestFeeBps from computeRouteStatus ────────────────────────────
 
 describe('Regression F — no negative bestFeeBps in any scenario', () => {

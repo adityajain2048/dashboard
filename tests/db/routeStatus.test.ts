@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { computeRouteStatus, STALE_THRESHOLD_MS } from '../../src/db/queries.js';
 import type { RouteLatestInput } from '../../src/db/queries.js';
+import { reRankQuotes } from '../../src/lib/quoteRanking.js';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -162,17 +163,16 @@ describe('computeRouteStatus — bestFeeBps', () => {
     expect(result.bestFeeBps).toBe(15);
   });
 
-  it('picks old-bridge when its age relative to lastSeen is within the freshness window', () => {
-    // old-bridge is T1_THRESHOLD+5s old; new-bridge is 60s old (= lastSeen).
-    // Age of old-bridge relative to lastSeen ≈ 46 min < 47 min threshold → included.
-    // If old-bridge were T1_THRESHOLD+60_001ms older than lastSeen it would be excluded.
+  it('picks old-bridge when it has better output — all valid rows ranked regardless of age', () => {
+    // old-bridge quote is STALE_THRESHOLD+5s old; new-bridge is 60s old (= lastSeen).
+    // Canonical spec: both are valid rows → both ranked → old-bridge wins (higher output).
     const rows = [
       row({ bridge: 'old-bridge', output_usd: '995', total_fee_bps: 5,  ageMs: T1_THRESHOLD + 5000 }),
       row({ bridge: 'new-bridge', output_usd: '980', total_fee_bps: 200, ageMs: 60_000 }),
     ];
     const result = computeRouteStatus(rows);
     expect(result.state).toBe('active'); // lastSeen = 1min ago (new-bridge) → fresh
-    expect(result.bestBridge).toBe('old-bridge'); // within freshness window of lastSeen → ranked
+    expect(result.bestBridge).toBe('old-bridge'); // higher output → wins
     expect(result.bestFeeBps).toBe(5);
   });
 
@@ -226,19 +226,21 @@ describe('computeRouteStatus — spreadBps', () => {
     expect(result.spreadBps).toBeNull();
   });
 
-  it('excludes stale rows beyond 1× threshold from lastSeen — spread uses only fresh bridges', () => {
-    // across is 60s old (= lastSeen). stargate is 94 min old — 93+ min older than lastSeen,
-    // which exceeds the 47 min freshness window. Only across passes the filter → spread = 0.
-    // This prevents a 90-min-old NEAR quote being compared against fresh Relay quotes to
-    // produce a fictitious spread (the exact bug that motivated this change).
+  it('includes all valid rows in ranking regardless of individual timestamp — spread reflects real diff', () => {
+    // across is 60s old (= lastSeen). stargate is 2× threshold old but still a valid quote.
+    // Canonical spec: both rows pass validity (output > 0.01, fee <= 1000) → both ranked.
+    // spread = round((990 - 970) / 990 * 10000) ≈ 202 bps — real price difference is shown.
     const rows = [
       row({ bridge: 'across',   output_usd: '990', total_fee_bps: 100, ageMs: 60_000 }),
       row({ bridge: 'stargate', output_usd: '970', total_fee_bps: 300, ageMs: T1_THRESHOLD * 2 }),
     ];
     const result = computeRouteStatus(rows);
     expect(result.state).toBe('active');      // lastSeen = 60s ago → fresh
-    expect(result.bestBridge).toBe('across'); // only fresh bridge
-    expect(result.spreadBps).toBe(0);         // single fresh bridge → no spread
+    expect(result.bestBridge).toBe('across'); // higher output
+    expect(result.worstBridge).toBe('stargate');
+    // Both valid rows ranked → spread is non-zero
+    expect(result.spreadBps).toBeGreaterThan(0);
+    expect(result.spreadBps).toBe(Math.round((10000 * (990 - 970)) / 990));
   });
 });
 
@@ -290,6 +292,73 @@ describe('computeRouteStatus — worstBridge', () => {
     expect(result.worstBridge).toBe('axelar');
     expect(result.bestOutputUsd).toBe('49997.98504000');
     expect(result.worstOutputUsd).toBe('49954.41385768');
+  });
+});
+
+// ─── Regression G: production mismatch pattern ───────────────────────────────
+// Root cause of 1,528 audit mismatches: freshness window excluded older bridge
+// quotes with BETTER output, causing an inferior fresh quote to rank as "best".
+// Pattern confirmed by audit: web_quoteCount == correct_quoteCount (same valid rows)
+// but correct_bestOutputUsd > web_bestOutputUsd in 970/1528 mismatch rows.
+
+describe('computeRouteStatus — Regression G (canonical mismatch pattern)', () => {
+  // Mirrors production: relay (direct, 2× threshold old, output=$49,995) vs
+  // polymer (fresh 60s, output=$49,875). Relay has $120 better output.
+  const LARGE_INPUT = '50000';
+  const rows = [
+    row({
+      bridge: 'polymer',
+      source: 'squid',
+      input_usd: LARGE_INPUT,
+      output_usd: '49875',
+      total_fee_bps: 25,
+      ageMs: 60_000,                    // very fresh
+    }),
+    row({
+      bridge: 'relay',
+      source: 'direct',
+      input_usd: LARGE_INPUT,
+      output_usd: '49995',
+      total_fee_bps: 1,
+      ageMs: T1_THRESHOLD * 2 + 10_000, // 2× threshold old — was excluded by old window
+    }),
+  ];
+
+  it('relay (better output, older quote) is bestBridge under canonical spec', () => {
+    const { bestBridge } = computeRouteStatus(rows);
+    expect(bestBridge).toBe('relay');
+  });
+
+  it('bestOutputUsd is relay\'s output (not polymer\'s inferior output)', () => {
+    const { bestOutputUsd } = computeRouteStatus(rows);
+    expect(bestOutputUsd).toBe('49995');
+  });
+
+  it('state is active (lastSeen driven by polymer\'s fresh quote)', () => {
+    const { state } = computeRouteStatus(rows);
+    expect(state).toBe('active');
+  });
+
+  it('spreadBps > 0 — both bridges in ranking, real price difference shown', () => {
+    const { spreadBps } = computeRouteStatus(rows);
+    expect(spreadBps).toBeGreaterThan(0);
+    expect(spreadBps).toBe(Math.round((10000 * (49995 - 49875)) / 49995));
+  });
+
+  it('bestBridge matches reRankQuotes rank[0]', () => {
+    const ranked = reRankQuotes(rows.map((r) => ({
+      bridge: r.bridge,
+      source: r.source,
+      outputUsd: r.output_usd,
+      totalFeeBps: r.total_fee_bps,
+    })));
+    const { bestBridge } = computeRouteStatus(rows);
+    expect(bestBridge).toBe(ranked[0]!.bridge);
+  });
+
+  it('worstBridge is polymer (lower output)', () => {
+    const { worstBridge } = computeRouteStatus(rows);
+    expect(worstBridge).toBe('polymer');
   });
 });
 

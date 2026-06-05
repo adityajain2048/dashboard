@@ -6,6 +6,7 @@ import type { RouteLatestInput } from '../../db/queries.js';
 
 const querySchema = z.object({
   limit: z.coerce.number().min(1).max(100).default(20),
+  offset: z.coerce.number().min(0).default(0),
   minSpreadBps: z.coerce.number().min(0).default(0),
   asset: z.enum(['ETH', 'USDC', 'USDT']).optional(),
   tier: z.enum(['50', '1000', '50000']).optional(),
@@ -25,15 +26,16 @@ export default async function opportunitiesRoutes(
     if (!parsed.success) {
       return reply.status(400).send({ error: 'Invalid query params', details: parsed.error.flatten() });
     }
-    const { limit, minSpreadBps, asset, tier } = parsed.data;
+    const { limit, offset, minSpreadBps, asset, tier } = parsed.data;
 
+    // Cache key covers everything that affects the full sorted list (not limit/offset —
+    // those only affect the slice). Full list is stored in cache and sliced per-request.
     const cacheKey = `${asset ?? '*'}:${tier ?? '*'}:${minSpreadBps}`;
     const cached = cache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
-      // Apply limit to cached result (limit may differ between callers)
       const cachedData = cached.payload as { opportunities: unknown[]; total: number };
       return reply.send({
-        opportunities: cachedData.opportunities.slice(0, limit),
+        opportunities: cachedData.opportunities.slice(offset, offset + limit),
         total: cachedData.total,
       });
     }
@@ -135,11 +137,12 @@ export default async function opportunitiesRoutes(
     opportunities.sort((a, b) => b.spreadBps - a.spreadBps);
     const total = opportunities.length;
 
+    // Store full sorted list in cache (not sliced) so any offset/limit can be served.
     const payload = { opportunities, total };
     cache.set(cacheKey, { payload, expiresAt: Date.now() + CACHE_TTL_MS });
 
     return reply.send({
-      opportunities: opportunities.slice(0, limit),
+      opportunities: opportunities.slice(offset, offset + limit),
       total,
     });
   });
