@@ -4,11 +4,10 @@
      · /api/matrix              → win matrix grid + corridor / fee KPIs
      · /api/bridges/coverage    → bridge leaderboard + top-bridge KPI
      · /api/bridges/health      → aggregator performance rail + top-agg KPI
-     · /api/opportunities       → highest-spread corridors
    ════════════════════════════════════════════════════════════════════════ */
 import React, { useState, useEffect, useMemo } from 'react';
-import { fetchMatrix, fetchBridgeCoverage, fetchBridgeHealth, fetchOpportunities, fetchHealth } from '../../api/client';
-import type { BridgeCoverageItem, AggregatorHealth, Opportunity } from '../../api/client';
+import { fetchMatrix, fetchBridgeCoverage, fetchBridgeHealth, fetchHealth } from '../../api/client';
+import type { BridgeCoverageItem, AggregatorHealth } from '../../api/client';
 import { Card, SectionTitle, Pill, ChainChip, BridgeTag } from '../../squid/brand';
 import { bridgeMeta, aggMeta, fmtPct, fmtUsd } from '../../squid/meta';
 import { WinMatrix, type MatrixCell } from './WinMatrix';
@@ -28,7 +27,6 @@ export function Insights({ asset, tier, onOpenRoute }: InsightsProps) {
   const [matrix, setMatrix] = useState<MatrixData | null>(null);
   const [bridges, setBridges] = useState<BridgeCoverageItem[]>([]);
   const [aggregators, setAggregators] = useState<AggregatorHealth[]>([]);
-  const [opps, setOpps] = useState<Opportunity[]>([]);
   const [health, setHealth] = useState<Awaited<ReturnType<typeof fetchHealth>> | null>(null);
 
   // Local asset/tier for the right-column boards (aggregator + bridge leaderboard).
@@ -41,15 +39,12 @@ export function Insights({ asset, tier, onOpenRoute }: InsightsProps) {
   useEffect(() => { setLocalAsset(asset); }, [asset]);
   useEffect(() => { setLocalTier(tier);   }, [tier]);
 
-  // Matrix + opportunities: reload on global asset/tier change and refresh every 60s.
+  // Matrix: reload on global asset/tier change and refresh every 60s.
   useEffect(() => {
     let cancelled = false;
     const load = (): void => {
       fetchMatrix(asset, tier)
         .then((r) => { if (!cancelled) setMatrix({ cells: r.cells as MatrixCell[], stats: r.stats }); })
-        .catch(() => { /* keep last good data */ });
-      fetchOpportunities(asset, tier, 6, 1)
-        .then((r) => { if (!cancelled) setOpps(r.opportunities); })
         .catch(() => { /* keep last good data */ });
     };
     load();
@@ -174,62 +169,6 @@ export function Insights({ asset, tier, onOpenRoute }: InsightsProps) {
         </div>
       </div>
 
-      {/* ─── ROUTING INTELLIGENCE ─── */}
-      <Card pad={18}>
-        <SectionTitle accent="var(--warn)" sub="routes where bridge choice has the biggest dollar impact — click any to explore">
-          Routing intelligence
-        </SectionTitle>
-        {opps.length === 0 ? (
-          <div className="t-caption" style={{ padding: '8px 2px' }}>No high-spread corridors at this asset / size right now.</div>
-        ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 12 }}>
-            {opps.map((c) => {
-              const bestOut = c.bestOutputUsd ? parseFloat(c.bestOutputUsd) : null;
-              const worstOut = c.worstOutputUsd ? parseFloat(c.worstOutputUsd) : null;
-              const savingsUsd = bestOut != null && worstOut != null ? bestOut - worstOut : null;
-              return (
-                <div key={`${c.src}:${c.dst}`} onClick={() => onOpenRoute?.(c.src, c.dst)}
-                  className="sq-card-hover"
-                  style={{ background: 'var(--bg-2)', border: '1px solid var(--line)', borderRadius: 'var(--r-sm)', padding: 14, cursor: 'pointer' }}>
-                  {/* corridor header */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                    <ChainChip id={c.src} size={22} />
-                    <span style={{ color: 'var(--fg-4)', fontSize: 12 }}>→</span>
-                    <ChainChip id={c.dst} size={22} />
-                    <Pill tone="warn" style={{ marginLeft: 'auto' }}>{fmtPct(c.spreadBps)} spread</Pill>
-                  </div>
-                  {/* savings banner */}
-                  {savingsUsd != null && (
-                    <div style={{ background: 'rgba(245,196,81,0.08)', border: '1px solid rgba(245,196,81,0.18)', borderRadius: 'var(--r-xs)', padding: '7px 10px', marginBottom: 10 }}>
-                      <span className="t-mono-xs" style={{ color: 'var(--fg-3)' }}>ROUTING RIGHT SAVES </span>
-                      <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 15, color: 'var(--warn)' }}>{fmtUsd(savingsUsd)}</span>
-                      <span className="t-mono-xs" style={{ color: 'var(--fg-3)' }}> ON THIS ROUTE</span>
-                    </div>
-                  )}
-                  {/* best vs worst side by side */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                    <div style={{ background: 'rgba(123,224,166,0.07)', borderRadius: 'var(--r-xs)', padding: '8px 10px' }}>
-                      <div className="t-mono-xs" style={{ color: 'var(--good)', marginBottom: 5 }}>BEST BRIDGE</div>
-                      {c.bestBridge ? <BridgeTag id={c.bestBridge} /> : <span className="t-caption">—</span>}
-                      {bestOut != null && (
-                        <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12, color: 'var(--fg-1)', marginTop: 5 }}>{fmtUsd(bestOut)}</div>
-                      )}
-                    </div>
-                    <div style={{ background: 'rgba(255,107,129,0.07)', borderRadius: 'var(--r-xs)', padding: '8px 10px' }}>
-                      <div className="t-mono-xs" style={{ color: 'var(--bad)', marginBottom: 5 }}>WORST BRIDGE</div>
-                      {c.worstBridge ? <BridgeTag id={c.worstBridge} /> : <span className="t-caption">—</span>}
-                      {worstOut != null && (
-                        <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12, color: 'var(--fg-3)', marginTop: 5 }}>{fmtUsd(worstOut)}</div>
-                      )}
-                    </div>
-                  </div>
-                  <div className="t-mono-xs" style={{ color: 'var(--fg-4)', marginTop: 8 }}>{c.quoteCount} bridges compared · click to explore</div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </Card>
     </div>
   );
 }
