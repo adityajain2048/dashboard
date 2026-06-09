@@ -8,8 +8,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { fetchMatrix, fetchBridgeCoverage, fetchBridgeHealth, fetchHealth } from '../../api/client';
 import type { BridgeCoverageItem, AggregatorHealth } from '../../api/client';
-import { Card, SectionTitle, Pill, ChainChip, BridgeTag } from '../../squid/brand';
-import { bridgeMeta, aggMeta, fmtPct, fmtUsd } from '../../squid/meta';
+import { Card, SectionTitle, Pill } from '../../squid/brand';
+import { bridgeMeta, aggMeta, fmtPct } from '../../squid/meta';
 import { WinMatrix, type MatrixCell } from './WinMatrix';
 
 interface MatrixData {
