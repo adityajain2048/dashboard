@@ -117,6 +117,9 @@ export default async function opportunitiesRoutes(
       if (state !== 'active' && state !== 'single-bridge') continue;
       if ((spreadBps ?? 0) < minSpreadBps) continue;
       if (bestFeeBps == null || bestFeeBps >= 1000) continue;
+      // Skip routes where best and worst are the same bridge — these reflect
+      // aggregator pricing differences, not a real routing choice.
+      if (bestBridge !== null && worstBridge !== null && bestBridge === worstBridge) continue;
 
       opportunities.push({
         src: meta.src,
