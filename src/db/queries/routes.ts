@@ -9,6 +9,29 @@ import { selectBestQuote, selectWorstQuote, computeSpreadBps, reRankQuotes } fro
  */
 export const STALE_THRESHOLD_MS = 3 * 60 * 60 * 1000; // 3 hours
 
+/**
+ * Hard TTL for route_latest rows. A quote no source has refreshed within this
+ * window is a stale "ghost": it keeps winning the best-bridge ranking (which is
+ * price-based, not freshness-based) long after its liquidity is gone, and it
+ * keeps a genuinely-dead route looking alive. Pruning past this TTL means the
+ * matrix shows either a fresh quote or an honest `dead` — never a days-old ghost.
+ * 12h is well beyond the slowest refresh cadence, so live (even slow) routes survive.
+ */
+export const ROUTE_LATEST_TTL_HOURS = 12;
+
+/**
+ * Delete route_latest rows older than ROUTE_LATEST_TTL_HOURS. Returns the number
+ * of rows removed. Safe: rows refreshed within the window (i.e. any route a source
+ * still serves) are untouched; only routes dead across every source get pruned.
+ */
+export async function pruneStaleRouteLatest(): Promise<number> {
+  const res = await pool.query(
+    `DELETE FROM route_latest WHERE ts < NOW() - ($1 || ' hours')::interval`,
+    [ROUTE_LATEST_TTL_HOURS]
+  );
+  return res.rowCount ?? 0;
+}
+
 /** A single row from route_latest as consumed by computeRouteStatus. */
 export interface RouteLatestInput {
   bridge: string;

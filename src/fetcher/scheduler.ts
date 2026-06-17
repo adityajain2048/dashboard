@@ -9,6 +9,7 @@ import {
   hasRecentSquidQuotes,
   getSquidGapKeys,
   clearAllSquidSkips,
+  pruneStaleRouteLatest,
 } from '../db/queries.js';
 import { loadSkipMap, skipMap } from '../lib/aggregator-skip.js';
 
@@ -418,6 +419,19 @@ export function startScheduler(): void {
   setInterval(() => {
     loadSkipMap().catch(e => logger.warn(e, 'Skip map refresh failed'));
   }, 30 * 60_000);
+
+  // Prune stale route_latest "ghost" quotes (no source refreshed in 12h) so the
+  // matrix shows fresh data or an honest `dead`, never a days-old ghost. Run once
+  // shortly after startup, then every 30 min.
+  const runPrune = (): void => {
+    pruneStaleRouteLatest()
+      .then((removed) => {
+        if (removed > 0) logger.info({ component: 'scheduler', removed }, `Pruned ${removed} stale route_latest ghost rows (>12h)`);
+      })
+      .catch(e => logger.warn(e, 'route_latest prune failed'));
+  };
+  setTimeout(runPrune, 60_000);
+  setInterval(runPrune, 30 * 60_000);
 
   // ── LI.FI, Bungee, Rubic workers — start immediately, run independently ────
   runLifiWorker().catch(e => logger.error(e, 'LI.FI worker startup error'));
