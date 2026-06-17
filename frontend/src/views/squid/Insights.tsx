@@ -85,11 +85,14 @@ export function Insights({ asset, tier, onOpenRoute }: InsightsProps) {
   // ── derive headline KPIs ──
   const kpis = useMemo(() => {
     const cells = matrix?.cells.filter((c) => c.state !== 'dead' && c.bestFeeBps != null) ?? [];
-    // Use global total from health endpoint (unique src:dst pairs with ANY data, across all 9 combos).
-    // Falls back to per-combo matrix count until health data arrives.
-    const corridors = health?.db.totalPricedCorridors
+    // Use the per-combo priced count so "PRICED CORRIDORS" reflects exactly the
+    // selected asset × tier (not "any combo has a quote for this corridor").
+    const comboStat = health?.db.perCombo.find(c => c.asset === asset && c.tier === tier);
+    const corridors = comboStat?.priced
       ?? ((matrix?.stats.active ?? 0) + (matrix?.stats.singleBridge ?? 0) + (matrix?.stats.stale ?? 0));
-    const zeroCoverage = health?.db.zeroCoverageCorridors ?? (matrix?.stats.dead ?? 0);
+    const zeroCoverage = comboStat != null
+      ? 3080 - comboStat.priced
+      : (matrix?.stats.dead ?? 0);
     const avgFee = cells.length ? cells.reduce((s, c) => s + (c.bestFeeBps ?? 0), 0) / cells.length : 0;
     const bridgeBoard = [...bridges].sort((a, b) => b.wins - a.wins);
     const topBridge = bridgeBoard[0] ?? null;
@@ -97,7 +100,7 @@ export function Insights({ asset, tier, onOpenRoute }: InsightsProps) {
     const aggBoard = [...aggregators].sort((a, b) => (b.wins ?? 0) - (a.wins ?? 0) || b.successRate - a.successRate);
     const topAgg = aggBoard[0] ?? null;
     return { corridors, zeroCoverage, avgFee, topBridge, topAgg, bridgeBoard, aggBoard };
-  }, [matrix, health, bridges, aggregators]);
+  }, [matrix, health, bridges, aggregators, asset, tier]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
