@@ -20,6 +20,10 @@ import type { AggregatorId } from '../types/index.js';
 import { logger } from './logger.js';
 import { RateLimitError } from './errors.js';
 
+// Never honour a Retry-After longer than this — prevents a single 429 from
+// freezing a worker for 40+ minutes when LI.FI (or any source) issues 2400s.
+const MAX_429_PAUSE_MS = 5 * 60_000; // 5 minutes max
+
 // ─── Public interface ─────────────────────────────────────────────────────────
 
 export interface IAdaptiveLimiter {
@@ -79,6 +83,9 @@ export class AdaptiveLimiter implements IAdaptiveLimiter {
       highWater: config.highWater === -1 ? undefined : config.highWater,
       strategy: Bottleneck.strategy.OVERFLOW,
       reservoir: 100_000,
+      // Jobs waiting in queue >10 min reject rather than hanging indefinitely.
+      // Belt-and-suspenders against MAX_429_PAUSE_MS — unblocks Promise.allSettled.
+      timeout: 10 * 60_000,
     });
   }
 
@@ -93,14 +100,17 @@ export class AdaptiveLimiter implements IAdaptiveLimiter {
   }
 
   on429(retryAfterMs: number): void {
+    // Cap: never honour a Retry-After longer than MAX_429_PAUSE_MS so a single
+    // 429 can't freeze a worker indefinitely (e.g. LI.FI 2400s → 5 min max).
     // Coalesce a burst of concurrent 429s into ONE backoff. Many in-flight
     // requests on the same key get 429'd together; without this guard each one
     // multiplies the backoff, collapsing the rate geometrically (e.g. LI.FI
     // 0.66→0.13 req/s in one second from 5 simultaneous 429s). The floor keeps
     // the dedup window sane when retryAfterMs is small.
+    const effectiveMs = Math.min(retryAfterMs, MAX_429_PAUSE_MS);
     const now = Date.now();
     if (now < this.pausedUntil) return;
-    this.pausedUntil = now + Math.max(retryAfterMs, 2_000);
+    this.pausedUntil = now + Math.max(effectiveMs, 2_000);
 
     void this.bottleneck.currentReservoir().then((current) => {
       if (current !== null && current > 0) {
@@ -115,9 +125,12 @@ export class AdaptiveLimiter implements IAdaptiveLimiter {
     );
     const newRps = (1000 / this.currentMinTime).toFixed(2);
 
+    const cappedNote = effectiveMs < retryAfterMs
+      ? ` (API requested ${Math.ceil(retryAfterMs / 1000)}s — capped)`
+      : '';
     logger.warn(
-      { limiter: this.name, pauseSec: Math.ceil(retryAfterMs / 1000), prevRps: Number(prevRps), newRps: Number(newRps) },
-      `${this.name}: 429 — pausing ${Math.ceil(retryAfterMs / 1000)}s, rate ${prevRps}→${newRps} req/s`,
+      { limiter: this.name, pauseSec: Math.ceil(effectiveMs / 1000), requestedSec: Math.ceil(retryAfterMs / 1000), prevRps: Number(prevRps), newRps: Number(newRps) },
+      `${this.name}: 429 — pausing ${Math.ceil(effectiveMs / 1000)}s${cappedNote}, rate ${prevRps}→${newRps} req/s`,
     );
 
     this.consecutiveSuccesses = 0;
@@ -129,7 +142,7 @@ export class AdaptiveLimiter implements IAdaptiveLimiter {
         { limiter: this.name, rps: Number(newRps) },
         `${this.name}: cooldown over — resuming at ${newRps} req/s`,
       );
-    }, retryAfterMs);
+    }, effectiveMs);
   }
 
   recordSuccess(): void {
@@ -246,14 +259,15 @@ export class KeyedAdaptiveLimiter implements IAdaptiveLimiter {
   }
 
   on429(retryAfterMs: number, key?: string): void {
+    const effectiveMs = Math.min(retryAfterMs, MAX_429_PAUSE_MS);
     const targets =
       key && this.keyLimiters.has(key)
         ? [key]
         : [...this.keyLimiters.keys()];
     for (const k of targets) {
-      this.keyPausedUntil.set(k, Date.now() + retryAfterMs);
-      this.keyLimiters.get(k)!.on429(retryAfterMs);
-      setTimeout(() => this.keyPausedUntil.delete(k), retryAfterMs);
+      this.keyPausedUntil.set(k, Date.now() + effectiveMs);
+      this.keyLimiters.get(k)!.on429(retryAfterMs); // AdaptiveLimiter applies same cap
+      setTimeout(() => this.keyPausedUntil.delete(k), effectiveMs);
     }
   }
 

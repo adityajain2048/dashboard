@@ -28,6 +28,11 @@ const BUNGEE_REST_MS = 15 * 60_000;  // 15 min
 const RUBIC_REST_MS  = 20 * 60_000;  // 20 min (small set — fast cycle)
 const BRIDGE_REST_MS = 10 * 60_000;  // 10 min
 
+// If a cycle exceeds this, break out of the batch loop so finally{} resets the
+// running flag and the worker restarts. Prevents permanent deadlock if the rate
+// limiter pause somehow outlasts MAX_429_PAUSE_MS (double-deadlock guard).
+const WORKER_CYCLE_MAX_MS = 4 * 60 * 60_000; // 4 hours
+
 // ─── Squid: only skip the initial sweep if data is THIS fresh ────────────────
 // Prevents re-sweeping on quick restart (<2 min crash-and-restart).
 const SKIP_SWEEP_IF_FRESH_MS = 2 * 60_000;
@@ -129,6 +134,7 @@ async function runSquidWorker(): Promise<void> {
 
     const batchId = generateBatchId();
     const start = Date.now();
+    const deadline = start + WORKER_CYCLE_MAX_MS;
     const priorityCount = tasks.filter(
       t => SQUID_PRIORITY_CHAINS.has(t.src) || SQUID_PRIORITY_CHAINS.has(t.dst)
     ).length;
@@ -141,6 +147,10 @@ async function runSquidWorker(): Promise<void> {
     let covered = 0, gap = 0, errors = 0, done = 0;
 
     for (const batch of chunk(tasks, SQUID_CONCURRENCY)) {
+      if (Date.now() > deadline) {
+        log.warn({ done, total: tasks.length }, 'Squid cycle deadline exceeded — aborting and restarting');
+        break;
+      }
       const results = await Promise.allSettled(
         batch.map(t => processRoute(t.src, t.dst, t.asset, t.amountTier, batchId, log, ['squid'], true))
       );
@@ -192,11 +202,16 @@ async function runLifiWorker(): Promise<void> {
     const batchId = generateBatchId();
     const tasks = buildTasks();
     const start = Date.now();
+    const deadline = start + WORKER_CYCLE_MAX_MS;
     let totalQuotes = 0, successRoutes = 0, done = 0;
 
     log.info({ total: tasks.length, concurrency: LIFI_CONCURRENCY }, 'LI.FI worker cycle starting');
 
     for (const batch of chunk(tasks, LIFI_CONCURRENCY)) {
+      if (Date.now() > deadline) {
+        log.warn({ done, total: tasks.length }, 'LI.FI cycle deadline exceeded — aborting and restarting');
+        break;
+      }
       const results = await Promise.allSettled(
         batch.map(t => processRoute(t.src, t.dst, t.asset, t.amountTier, batchId, log, ['lifi'], true))
       );
@@ -235,11 +250,16 @@ async function runBungeeWorker(): Promise<void> {
     const batchId = generateBatchId();
     const tasks = buildTasks();
     const start = Date.now();
+    const deadline = start + WORKER_CYCLE_MAX_MS;
     let totalQuotes = 0, successRoutes = 0, done = 0;
 
     log.info({ total: tasks.length, concurrency: BUNGEE_CONCURRENCY }, 'Bungee worker cycle starting');
 
     for (const batch of chunk(tasks, BUNGEE_CONCURRENCY)) {
+      if (Date.now() > deadline) {
+        log.warn({ done, total: tasks.length }, 'Bungee cycle deadline exceeded — aborting and restarting');
+        break;
+      }
       const results = await Promise.allSettled(
         batch.map(t => processRoute(t.src, t.dst, t.asset, t.amountTier, batchId, log, ['bungee'], true))
       );
@@ -280,11 +300,16 @@ async function runRubicWorker(): Promise<void> {
       t => RUBIC_CHAINS.has(t.src) || RUBIC_CHAINS.has(t.dst)
     );
     const start = Date.now();
+    const deadline = start + WORKER_CYCLE_MAX_MS;
     let totalQuotes = 0, done = 0;
 
     log.info({ total: tasks.length, concurrency: RUBIC_CONCURRENCY }, 'Rubic worker cycle starting');
 
     for (const batch of chunk(tasks, RUBIC_CONCURRENCY)) {
+      if (Date.now() > deadline) {
+        log.warn({ done, total: tasks.length }, 'Rubic cycle deadline exceeded — aborting and restarting');
+        break;
+      }
       const results = await Promise.allSettled(
         batch.map(t => processRoute(t.src, t.dst, t.asset, t.amountTier, batchId, log, ['rubic'], true))
       );
@@ -336,6 +361,7 @@ async function runBridgeWorker(): Promise<void> {
 
     const batchId = generateBatchId();
     const start = Date.now();
+    const deadline = start + WORKER_CYCLE_MAX_MS;
     let filled = 0, done = 0;
 
     log.info(
@@ -344,6 +370,10 @@ async function runBridgeWorker(): Promise<void> {
     );
 
     for (const batch of chunk(tasks, BRIDGE_CONCURRENCY)) {
+      if (Date.now() > deadline) {
+        log.warn({ done, total: tasks.length }, 'Bridge cycle deadline exceeded — aborting and restarting');
+        break;
+      }
       const results = await Promise.allSettled(
         batch.map(t => {
           const proven = coverageMap.get(t.key) as AggregatorId[] | undefined;
