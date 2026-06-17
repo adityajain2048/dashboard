@@ -347,18 +347,17 @@ const AGGREGATOR_CONFIGS: Record<AggregatorId, AdaptiveLimiterConfig> = {
     highWater:         -1,
   },
 
-  // Squid: burst-tested at 10 RPS for 30s.
-  // Result: 85.9% ok, 7.4% 429, p50=800ms, retry-after 0.016–0.314s (fractional seconds).
-  // Conservative config: maxConcurrent=10 caps in-flight. At p50 (800ms) that yields
-  // 10/0.8 = 12.5 RPS but minTime=100ms limits launches to 10 RPS. When responses
-  // slow to p90 (1429ms) the cap binds: 10/1.429 ≈ 7 RPS — averaging ~8 RPS sustained.
+  // Squid: 20 RPS plan. Burst-tested at 10 RPS (7.4% 429, retry-after 16–314ms → floored to
+  // 1s in squid.ts). At 20 RPS the adaptive limiter will self-calibrate — 429s trigger a
+  // 2s pause then recover. maxConcurrent=25 covers 20 RPS at ~1.2s avg latency (Little's
+  // law: L = λW = 20 × 1.2 = 24 slots needed; 25 gives headroom).
   squid: {
-    maxConcurrent:     10,    // conservative cap — ~8 RPS effective at avg latency
-    initialMinTime:    100,   // 10 RPS launch rate
+    maxConcurrent:     25,    // saturates 20 RPS at ~1.2s avg response latency
+    initialMinTime:    50,    // 20 RPS launch rate
     backoffFactor:     1.5,
     maxMinTime:        30_000,
     recoveryFactor:    0.9,
-    minMinTime:        100,   // hold floor at 10 RPS; no adaptive acceleration
+    minMinTime:        50,    // floor at 20 RPS; adaptive limiter backs off on 429
     recoveryThreshold: 50,
     circuitThreshold:  20,
     circuitCooldownMs: 60_000,

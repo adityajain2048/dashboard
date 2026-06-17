@@ -217,8 +217,7 @@ export async function fetchAllAggregators(
           (isNoRouteErr ||
             isHttp400 ||
             lower.includes('none of the available routes') ||
-            lower.includes('no route') ||
-            lower.includes('operation was aborted'));
+            lower.includes('no route'));
 
         const status = isTimeout
           ? 'timeout'

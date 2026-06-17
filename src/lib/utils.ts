@@ -77,6 +77,10 @@ export async function fetchWithTimeout(
     return res;
   } catch (e) {
     clearTimeout(t);
+    // AbortController fires a DOMException, not Error('timeout'). Normalize it so
+    // the aggregator layer (callErr.message === 'timeout') can stop p-retry from
+    // wasting 2 extra retries on an already-timed-out call.
+    if (e instanceof DOMException && e.name === 'AbortError') throw new Error('timeout');
     throw e;
   }
 }

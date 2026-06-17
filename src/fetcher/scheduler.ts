@@ -14,7 +14,9 @@ import { loadSkipMap, skipMap } from '../lib/aggregator-skip.js';
 
 // ─── Per-worker concurrency (batch size) ─────────────────────────────────────
 
-const SQUID_CONCURRENCY  = 10;  // ~4.5 rps effective (batch-wait overhead)
+// Feed Bottleneck in windows large enough that it never idles between outer batches.
+// 500 tasks ≈ 25 s of work at 20 RPS — Bottleneck handles internal concurrency.
+const SQUID_WINDOW = 500;
 const LIFI_CONCURRENCY   = 20;  // 3 keys × 3.33 rps = 10 rps combined
 const BUNGEE_CONCURRENCY = 8;
 const RUBIC_CONCURRENCY  = 5;   // fallback chains only — small task set
@@ -140,38 +142,37 @@ async function runSquidWorker(): Promise<void> {
     ).length;
 
     log.info(
-      { total: tasks.length, priority: priorityCount, concurrency: SQUID_CONCURRENCY },
+      { total: tasks.length, priority: priorityCount, window: SQUID_WINDOW },
       `Squid worker cycle starting — ${priorityCount} priority tasks first`
     );
 
     let covered = 0, gap = 0, errors = 0, done = 0;
 
-    for (const batch of chunk(tasks, SQUID_CONCURRENCY)) {
+    for (const window of chunk(tasks, SQUID_WINDOW)) {
       if (Date.now() > deadline) {
         log.warn({ done, total: tasks.length }, 'Squid cycle deadline exceeded — aborting and restarting');
         break;
       }
-      const results = await Promise.allSettled(
-        batch.map(t => processRoute(t.src, t.dst, t.asset, t.amountTier, batchId, log, ['squid'], true))
+      // All tasks in the window queue into the Bottleneck simultaneously.
+      // The rate limiter (maxConcurrent=25, minTime=50ms) controls actual throughput —
+      // no task waits for a full batch to finish before the next one can start.
+      await Promise.allSettled(
+        window.map(async (t) => {
+          const count = await processRoute(t.src, t.dst, t.asset, t.amountTier, batchId, log, ['squid'], true);
+          done++;
+          if (count > 0) {
+            covered++;
+          } else {
+            squidGapKeys.add(makeTaskKey(t.src, t.dst, t.asset, t.amountTier));
+            gap++;
+          }
+          if (done % 1000 === 0) {
+            const pct = ((done / tasks.length) * 100).toFixed(1);
+            const eta_s = Math.round(((tasks.length - done) / done) * (Date.now() - start) / 1000);
+            log.info({ done, total: tasks.length, pct, covered, gap, eta_s }, 'Squid worker progress');
+          }
+        })
       );
-      for (let i = 0; i < results.length; i++) {
-        const r = results[i]!;
-        const t = batch[i]!;
-        done++;
-        if (r.status === 'fulfilled' && r.value > 0) {
-          covered++;
-        } else {
-          squidGapKeys.add(makeTaskKey(t.src, t.dst, t.asset, t.amountTier));
-          if (r.status === 'rejected') errors++; else gap++;
-        }
-      }
-      if (done % 1000 < SQUID_CONCURRENCY) {
-        const pct = ((done / tasks.length) * 100).toFixed(1);
-        const eta_s = done > 0
-          ? Math.round(((tasks.length - done) / done) * (Date.now() - start) / 1000)
-          : '?';
-        log.info({ done, total: tasks.length, pct, covered, gap, eta_s }, 'Squid worker progress');
-      }
     }
 
     await refreshGapKeysFromDB();
