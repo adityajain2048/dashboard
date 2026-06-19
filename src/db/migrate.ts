@@ -105,6 +105,11 @@ async function runMigrations(): Promise<void> {
     }
 
     await client.query('BEGIN');
+    // Migrations may run long DDL (hypertables, continuous aggregates, indexes on
+    // populated tables). Disable the pool's statement/lock timeouts for this
+    // transaction so a slow-but-legitimate migration is never cancelled mid-build.
+    await client.query('SET LOCAL statement_timeout = 0');
+    await client.query('SET LOCAL lock_timeout = 0');
     for (const { file, sql } of strippedSqls) {
       logger.info({ file }, 'Running migration');
       await client.query(sql);

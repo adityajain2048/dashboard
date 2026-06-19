@@ -49,9 +49,25 @@ const pool = new Pool({
   max: 30,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
+  // Bound query EXECUTION so a stuck write can never freeze a fetcher worker
+  // forever — the root cause of the Squid/LI.FI worker hang. connectionTimeoutMillis
+  // only bounds acquiring a connection, not running the query.
+  //  • statement_timeout: server-side cancel of any query running >30s (covers
+  //    lock waits on route_status UPSERTs across overlapping routes).
+  //  • query_timeout: client-side timer that fires even when Azure silently drops
+  //    the TCP socket mid-query (server-side cancel can't reach a dead socket).
+  // Migrations opt out of these via SET LOCAL (see migrate.ts) so long DDL is safe.
+  statement_timeout: 30000,
+  query_timeout: 30000,
   keepAlive: true,
   keepAliveInitialDelayMillis: 10000,
   ...(useSSL ? { ssl: { rejectUnauthorized: false } } : {}),
+});
+
+// Fail fast on row-lock contention instead of waiting indefinitely. statement_timeout
+// also bounds this (30s), but lock_timeout fails in 10s with a clear lock error.
+pool.on('connect', (client) => {
+  client.query('SET lock_timeout = 10000').catch(() => {});
 });
 
 // Log idle client errors so we know when connections drop — pg auto-removes

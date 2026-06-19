@@ -2,7 +2,7 @@ import type { Asset, AggregatorId } from '../types/index.js';
 import { ALL_ROUTES } from '../config/routes.js';
 import { processRoute } from './pipeline.js';
 import { generateBatchId, chunk } from '../lib/utils.js';
-import { logger } from '../lib/logger.js';
+import { logger, type Logger } from '../lib/logger.js';
 import { refreshNativePrices } from '../lib/prices.js';
 import {
   getGapCoverage,
@@ -35,6 +35,28 @@ const BRIDGE_REST_MS = 10 * 60_000;  // 10 min
 // running flag and the worker restarts. Prevents permanent deadlock if the rate
 // limiter pause somehow outlasts MAX_429_PAUSE_MS (double-deadlock guard).
 const WORKER_CYCLE_MAX_MS = 4 * 60 * 60_000; // 4 hours
+
+// A single batch must never take longer than this. With per-query DB timeouts (30s)
+// and per-call network timeouts (30s), a batch should finish in well under a minute.
+// If it ever exceeds this, abandon it so the worker loop ADVANCES (and finally{} can
+// run) instead of freezing forever inside Promise.allSettled — the failure mode that
+// killed the Squid/LI.FI workers. Abandoned tasks keep running harmlessly in the
+// background and settle on their own (now bounded by the DB query timeout).
+const BATCH_MAX_MS = 5 * 60_000; // 5 minutes (covers Squid's 500-task window)
+
+async function settleBatch<T>(
+  promises: Promise<T>[],
+  log: Logger,
+  label: string,
+): Promise<PromiseSettledResult<T>[]> {
+  const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), BATCH_MAX_MS));
+  const winner = await Promise.race([Promise.allSettled(promises), timeout]);
+  if (winner === null) {
+    log.warn({ label, size: promises.length }, `batch exceeded ${BATCH_MAX_MS / 1000}s — abandoning, worker loop continues`);
+    return [];
+  }
+  return winner;
+}
 
 // ─── Squid: only skip the initial sweep if data is THIS fresh ────────────────
 // Prevents re-sweeping on quick restart (<2 min crash-and-restart).
@@ -157,7 +179,7 @@ async function runSquidWorker(): Promise<void> {
       // All tasks in the window queue into the Bottleneck simultaneously.
       // The rate limiter (maxConcurrent=25, minTime=50ms) controls actual throughput —
       // no task waits for a full batch to finish before the next one can start.
-      await Promise.allSettled(
+      await settleBatch(
         window.map(async (t) => {
           const count = await processRoute(t.src, t.dst, t.asset, t.amountTier, batchId, log, ['squid'], true);
           done++;
@@ -172,7 +194,8 @@ async function runSquidWorker(): Promise<void> {
             const eta_s = Math.round(((tasks.length - done) / done) * (Date.now() - start) / 1000);
             log.info({ done, total: tasks.length, pct, covered, gap, eta_s }, 'Squid worker progress');
           }
-        })
+        }),
+        log, 'squid'
       );
     }
 
@@ -214,8 +237,9 @@ async function runLifiWorker(): Promise<void> {
         log.warn({ done, total: tasks.length }, 'LI.FI cycle deadline exceeded — aborting and restarting');
         break;
       }
-      const results = await Promise.allSettled(
-        batch.map(t => processRoute(t.src, t.dst, t.asset, t.amountTier, batchId, log, ['lifi'], true))
+      const results = await settleBatch(
+        batch.map(t => processRoute(t.src, t.dst, t.asset, t.amountTier, batchId, log, ['lifi'], true)),
+        log, 'lifi'
       );
       for (const r of results) {
         done++;
@@ -262,8 +286,9 @@ async function runBungeeWorker(): Promise<void> {
         log.warn({ done, total: tasks.length }, 'Bungee cycle deadline exceeded — aborting and restarting');
         break;
       }
-      const results = await Promise.allSettled(
-        batch.map(t => processRoute(t.src, t.dst, t.asset, t.amountTier, batchId, log, ['bungee'], true))
+      const results = await settleBatch(
+        batch.map(t => processRoute(t.src, t.dst, t.asset, t.amountTier, batchId, log, ['bungee'], true)),
+        log, 'bungee'
       );
       for (const r of results) {
         done++;
@@ -312,8 +337,9 @@ async function runRubicWorker(): Promise<void> {
         log.warn({ done, total: tasks.length }, 'Rubic cycle deadline exceeded — aborting and restarting');
         break;
       }
-      const results = await Promise.allSettled(
-        batch.map(t => processRoute(t.src, t.dst, t.asset, t.amountTier, batchId, log, ['rubic'], true))
+      const results = await settleBatch(
+        batch.map(t => processRoute(t.src, t.dst, t.asset, t.amountTier, batchId, log, ['rubic'], true)),
+        log, 'rubic'
       );
       for (const r of results) {
         done++;
@@ -376,7 +402,7 @@ async function runBridgeWorker(): Promise<void> {
         log.warn({ done, total: tasks.length }, 'Bridge cycle deadline exceeded — aborting and restarting');
         break;
       }
-      const results = await Promise.allSettled(
+      const results = await settleBatch(
         batch.map(t => {
           const proven = coverageMap.get(t.key) as AggregatorId[] | undefined;
           // Use historically proven aggregators, or try all non-Squid as fallback
@@ -384,7 +410,8 @@ async function runBridgeWorker(): Promise<void> {
             proven && proven.length > 0 ? proven : ['lifi', 'bungee', 'rubic'];
           // skipGapFill=false — bridge API calls are the whole point of this worker
           return processRoute(t.src, t.dst, t.asset, t.amountTier, batchId, log, subset, false);
-        })
+        }),
+        log, 'bridge'
       );
       for (const r of results) {
         done++;
