@@ -3,7 +3,7 @@ import type { NormalizedQuote, RouteKey } from '../../types/index.js';
 import { getToken, isPlaceholder } from '../../config/tokens.js';
 import { getChain } from '../../config/chains.js';
 import { resolveBridgeName } from '../../config/bridges.js';
-import { getFromAmountBase } from '../../lib/amounts.js';
+import { getFromAmountBase, computeSlippageBps } from '../../lib/amounts.js';
 import { logger } from '../../lib/logger.js';
 import { fetchWithTimeout } from '../../lib/utils.js';
 import { RateLimitError } from '../../lib/errors.js';
@@ -165,6 +165,7 @@ export async function fetchLifi(route: RouteKey, apiKey: string): Promise<Normal
       outputAmount: r.toAmount,
       inputUsd: r.fromAmountUSD ?? '0',
       outputUsd: r.toAmountUSD ?? '0',
+      slippageBps: computeSlippageBps(r.toAmount, r.toAmountMin),
       gasCostUsd: String(gasUsd),
       protocolFeeBps,
       totalFeeBps,

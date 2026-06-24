@@ -114,6 +114,11 @@ export interface NormalizedQuote {
   readonly totalFeeBps: number;    // Total fee in basis points (gas + protocol)
   readonly totalFeeUsd: string;    // Total fee in USD
 
+  // Slippage tolerance in basis points: (output − minOutput) / output. Only
+  // providers that expose a minimum-output guarantee (LI.FI, Squid) set this;
+  // null/undefined when unknown (Bungee, Rubic, direct bridges).
+  slippageBps?: number | null;
+
   // Timing
   readonly estimatedSeconds: number;
 

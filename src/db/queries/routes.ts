@@ -263,6 +263,7 @@ interface RouteLatestRow {
   estimated_seconds: number;
   rank_by_output: number | null;
   spread_bps: number | null;
+  slippage_bps: number | null;
 }
 
 /**
@@ -282,7 +283,7 @@ export async function getQuotesForRoute(
   const result = await query<RouteLatestRow>(
     `SELECT ts, batch_id, src_chain, dst_chain, asset, amount_tier, bridge, source,
             input_amount, output_amount, output_usd, input_usd, gas_cost_usd, total_fee_bps, total_fee_usd,
-            estimated_seconds, rank_by_output, spread_bps
+            estimated_seconds, rank_by_output, spread_bps, slippage_bps
      FROM route_latest
      WHERE src_chain = $1 AND dst_chain = $2 AND asset = $3 AND amount_tier = $4`,
     [src, dst, asset, tier]
@@ -315,6 +316,7 @@ export async function getQuotesForRoute(
       estimatedSeconds: row.estimated_seconds,
       isMultihop: false,
       steps: 1,
+      slippageBps: row.slippage_bps,
       // rank and spreadBps are recomputed below — do not use stored values
       rank: undefined,
       spreadBps: undefined,

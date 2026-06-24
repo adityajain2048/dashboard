@@ -3,7 +3,7 @@ import type { NormalizedQuote, RouteKey } from '../../types/index.js';
 import type { Chain } from '../../types/index.js';
 import { getToken, isPlaceholder } from '../../config/tokens.js';
 import { getChain } from '../../config/chains.js';
-import { getFromAmountBase } from '../../lib/amounts.js';
+import { getFromAmountBase, computeSlippageBps } from '../../lib/amounts.js';
 import { logger } from '../../lib/logger.js';
 import { fetchWithTimeout } from '../../lib/utils.js';
 import { RateLimitError, NoRouteError } from '../../lib/errors.js';
@@ -154,6 +154,7 @@ const SquidActionSchema = z.object({
 const SquidEstimateSchema = z.object({
   fromAmount:             z.string(),
   toAmount:               z.string(),
+  toAmountMin:            z.string().optional(),
   fromAmountUSD:          z.string().optional(),
   toAmountUSD:            z.string().optional(),
   estimatedRouteDuration: z.number().default(0),
@@ -289,6 +290,7 @@ export async function fetchSquid(route: RouteKey, _key: string): Promise<Normali
     outputAmount:   est.toAmount,
     inputUsd:       String(inputUsd),
     outputUsd:      String(outputUsd),
+    slippageBps:    computeSlippageBps(est.toAmount, est.toAmountMin),
     gasCostUsd:     String(gasCostUsd),
     protocolFeeBps,
     totalFeeBps,

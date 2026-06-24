@@ -64,6 +64,17 @@ export function outputAmountToUsd(
   return human * price;
 }
 
+/** Slippage tolerance in basis points = (output − minOutput) / output × 10000.
+ *  Returns null when minOutput is missing or inconsistent (so we never invent a
+ *  number). Both amounts are raw base units of the SAME token, so decimals cancel. */
+export function computeSlippageBps(toAmount: string, toAmountMin?: string | null): number | null {
+  if (toAmountMin == null) return null;
+  const out = Number(toAmount);
+  const min = Number(toAmountMin);
+  if (!(out > 0) || !Number.isFinite(min) || min < 0 || min > out) return null;
+  return Math.round((10000 * (out - min)) / out);
+}
+
 /** Convert a human-readable token amount string to base units (wei).
  *  e.g. humanToBase("0.95", 6) → "950000"
  *  Uses BigInt arithmetic to avoid floating-point precision loss. */
