@@ -26,6 +26,7 @@ interface QuoteRow {
   totalFeeBps: number;
   estimatedSeconds: number;
   spreadBps?: number;
+  priceImpactBps?: number | null;
 }
 
 /** Per-bridge best row, used for the competition bars + runner-up spread. */
@@ -37,6 +38,7 @@ interface CorridorDetail {
   bestBridge: string;
   bestAgg: string;
   outputUsd: number;
+  priceImpactBps: number | null;
   seconds: number;
   bridgeCount: number;
   runnerSpread: number | null;
@@ -59,6 +61,7 @@ function buildDetail(src: string, dst: string, quotes: QuoteRow[]): CorridorDeta
     bestBridge: best.bridge,
     bestAgg: best.source,
     outputUsd: parseFloat(best.outputUsd),
+    priceImpactBps: best.priceImpactBps ?? null,
     seconds: best.estimatedSeconds,
     bridgeCount: lines.length,
     runnerSpread: runner ? runner.spreadBps : null,
@@ -245,6 +248,7 @@ export function WinMatrix({ asset, tier, cells, stats, onOpenRoute }: WinMatrixP
         <CorridorCard
           cell={cell}
           detail={detailMatches ? detail : null}
+          tier={tier}
           pos={pos}
           wrapW={wrapRef.current ? wrapRef.current.clientWidth : 800}
         />
@@ -263,7 +267,7 @@ function LegendStat({ label, value, tone }: { label: string; value: number; tone
 }
 
 /* ─── The hover detail card ─── */
-function CorridorCard({ cell, detail, pos, wrapW }: { cell: MatrixCell; detail: CorridorDetail | null; pos: { x: number; y: number }; wrapW: number }) {
+function CorridorCard({ cell, detail, tier, pos, wrapW }: { cell: MatrixCell; detail: CorridorDetail | null; tier: number; pos: { x: number; y: number }; wrapW: number }) {
   const W = 300;
   const flip = pos.x + W + 28 > wrapW;
   const left = flip ? pos.x - W - 16 : pos.x + 16;
@@ -318,6 +322,26 @@ function CorridorCard({ cell, detail, pos, wrapW }: { cell: MatrixCell; detail: 
           <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 13, color: 'var(--fg-1)' }}>{detail ? `~${fmtTime(detail.seconds)}` : '—'}</span>
         </Field>
       </div>
+
+      {/* in → out → slippage breakdown */}
+      {detail && (
+        <div style={{ padding: '0 14px 11px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)' }}>
+            in <span style={{ color: 'var(--squid-lavender)' }}>{fmtUsd(tier)}</span>
+            <span style={{ color: 'var(--fg-4)' }}>{' → '}</span>
+            out <span style={{ color: 'var(--squid-lime)' }}>{fmtUsd(detail.outputUsd)}</span>
+          </span>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-4)' }}>
+            · impact {detail.priceImpactBps != null ? fmtPct(detail.priceImpactBps) : '—'}
+          </span>
+          {detail.bestAgg === 'lifi' && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 6px', borderRadius: 'var(--r-pill)', background: 'rgba(245,196,81,0.12)', border: '1px solid rgba(245,196,81,0.32)' }}>
+              <span style={{ fontSize: 8 }}>⚠</span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--warn)' }}>25 bps fee</span>
+            </span>
+          )}
+        </div>
+      )}
 
       {/* competition bars */}
       <div style={{ padding: '4px 14px 12px' }}>

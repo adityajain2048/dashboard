@@ -11,6 +11,7 @@ import { SquidMark, SquidWordmark } from './squid/brand';
 import { Insights } from './views/squid/Insights';
 import { RouteExplorer } from './views/squid/RouteExplorer';
 import { Leaderboard } from './views/squid/Leaderboard';
+import { Methodology } from './views/squid/Methodology';
 
 const ASSETS = ['USDC', 'USDT', 'ETH'] as const;
 const TIERS: Array<{ k: number; l: string }> = [
@@ -19,11 +20,12 @@ const TIERS: Array<{ k: number; l: string }> = [
   { k: 50000, l: '$50K' },
 ];
 
-type View = 'insights' | 'explorer' | 'bridges';
+type View = 'insights' | 'explorer' | 'bridges' | 'methodology';
 const NAV: Array<{ k: View; l: string; icon: string }> = [
   { k: 'insights', l: 'Insights', icon: '◇' },
   { k: 'explorer', l: 'Route Explorer', icon: '◈' },
   { k: 'bridges', l: 'Bridge Leaderboard', icon: '▤' },
+  { k: 'methodology', l: 'Methodology', icon: '𝑓' },
 ];
 
 interface HealthData {
@@ -138,6 +140,7 @@ function App() {
           {view === 'insights' && <Insights asset={asset} tier={tier} onOpenRoute={openRoute} />}
           {view === 'explorer' && <RouteExplorer asset={asset} tier={tier} route={route} />}
           {view === 'bridges' && <Leaderboard asset={asset} tier={tier} />}
+          {view === 'methodology' && <Methodology />}
         </main>
       </div>
     </div>

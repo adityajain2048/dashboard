@@ -26,6 +26,7 @@ interface QuoteRow {
   estimatedSeconds: number;
   rank?: number;
   spreadBps?: number;
+  priceImpactBps?: number | null;
 }
 
 interface RouteExplorerProps {
@@ -260,10 +261,6 @@ function QuoteSection({ title, sub, quotes, asset, dst, tier, refreshIn }: {
           // inflation (e.g. LI.FI pricing input at $1,026 when our tier is $1,000).
           const effectiveFeeUsd = Math.max(0, tier - out);
           const effectiveFeeBps = tier > 0 ? Math.round((10000 * effectiveFeeUsd) / tier) : 0;
-          // Gas split: keep aggregator gas; derive protocol = effective_fee − gas.
-          const gas = parseFloat(q.gasCostUsd);
-          const proto = Math.max(effectiveFeeUsd - gas, 0);
-          const gasPct = effectiveFeeUsd > 0 ? (gas / effectiveFeeUsd) * 100 : 0;
           const srcCount = bridgeSourceCount.get(q.bridge)?.size ?? 1;
           const spreadBps = bestOut > 0 ? Math.max(0, Math.round((10000 * (bestOut - out)) / bestOut)) : 0;
           const spreadColor = spreadBps < 30 ? 'var(--good)' : spreadBps < 100 ? 'var(--warn)' : 'var(--bad)';
@@ -278,10 +275,20 @@ function QuoteSection({ title, sub, quotes, asset, dst, tier, refreshIn }: {
                 <BridgeTag id={q.bridge} />
                 {srcCount > 1 && <div className="t-mono-xs" style={{ color: 'var(--fg-4)', marginTop: 3, marginLeft: 14 }}>on {srcCount} aggregators</div>}
               </div>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ width: 7, height: 7, borderRadius: 2, background: aggMeta(q.source).color }} />
-                <span style={{ fontFamily: 'var(--font-ui)', fontWeight: 500, fontSize: 12, color: 'var(--fg-2)' }}>{aggMeta(q.source).name}</span>
-              </span>
+              <div>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ width: 7, height: 7, borderRadius: 2, background: aggMeta(q.source).color }} />
+                  <span style={{ fontFamily: 'var(--font-ui)', fontWeight: 500, fontSize: 12, color: 'var(--fg-2)' }}>{aggMeta(q.source).name}</span>
+                </span>
+                {q.source === 'lifi' && (
+                  <div style={{ marginTop: 4 }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 6px', borderRadius: 'var(--r-pill)', background: 'rgba(245,196,81,0.12)', border: '1px solid rgba(245,196,81,0.32)' }} title="LI.FI applies a 25 bps platform fee, deducted from output">
+                      <span style={{ fontSize: 8 }}>⚠</span>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 8.5, color: 'var(--warn)' }}>25bps fee</span>
+                    </span>
+                  </div>
+                )}
+              </div>
               <div style={{ textAlign: 'right' }}>
                 <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 14, color: i === 0 ? 'var(--squid-lime)' : 'var(--fg-1)' }}>{fmtUsd(out)}</div>
                 <div className="t-mono-xs" style={{ color: 'var(--fg-4)', marginTop: 2 }}>{formatTokenAmount(q.outputAmount, asset, dst)} {getReceiveSymbol(asset, dst)}</div>
@@ -291,11 +298,8 @@ function QuoteSection({ title, sub, quotes, asset, dst, tier, refreshIn }: {
                   {effectiveFeeUsd > 0 ? fmtUsd(effectiveFeeUsd) : <span style={{ color: 'var(--good)' }}>+{fmtUsd(out - tier)}</span>}
                   {' '}<span style={{ color: 'var(--fg-4)', fontSize: 10 }}>{effectiveFeeBps}bps</span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
-                  <div style={{ width: 60, height: 5, borderRadius: 3, background: 'var(--bg-3)', overflow: 'hidden', display: 'flex' }}>
-                    <div style={{ width: `${gasPct}%`, background: 'var(--fg-4)' }} title={`gas ${fmtUsd(gas)}`} />
-                    <div style={{ width: `${100 - gasPct}%`, background: 'var(--warn)' }} title={`protocol ${fmtUsd(proto)}`} />
-                  </div>
+                <div className="t-mono-xs" style={{ color: 'var(--fg-4)', marginTop: 4, textAlign: 'right' }} title="Price impact — the real liquidity-driven slippage. Shown where the provider reports it (Squid); — otherwise.">
+                  impact {q.priceImpactBps != null ? fmtPct(q.priceImpactBps) : '—'}
                 </div>
               </div>
               <span style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--fg-2)' }}>~{fmtTime(q.estimatedSeconds)}</span>
