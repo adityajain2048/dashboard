@@ -114,10 +114,10 @@ export interface NormalizedQuote {
   readonly totalFeeBps: number;    // Total fee in basis points (gas + protocol)
   readonly totalFeeUsd: string;    // Total fee in USD
 
-  // Slippage tolerance in basis points: (output − minOutput) / output. Only
-  // providers that expose a minimum-output guarantee (LI.FI, Squid) set this;
-  // null/undefined when unknown (Bungee, Rubic, direct bridges).
-  slippageBps?: number | null;
+  // Price impact in basis points — the real, liquidity-driven slippage (how much
+  // the trade moves the price given pool depth). NOT the user-set slippage tolerance.
+  // Only providers that report it set this (Squid: aggregatePriceImpact); null otherwise.
+  priceImpactBps?: number | null;
 
   // Timing
   readonly estimatedSeconds: number;

@@ -38,7 +38,7 @@ export async function insertQuotesBatch(quotes: NormalizedQuote[]): Promise<numb
     toInt(q.steps),
     toInt(q.rank),
     toInt(q.spreadBps),
-    toInt(q.slippageBps),
+    toInt(q.priceImpactBps),
   ]);
 
   const sql = format(
@@ -46,7 +46,7 @@ export async function insertQuotesBatch(quotes: NormalizedQuote[]): Promise<numb
       ts, batch_id, src_chain, dst_chain, asset, amount_tier, source, bridge,
       input_amount, output_amount, input_usd, output_usd, gas_cost_usd,
       protocol_fee_bps, total_fee_bps, total_fee_usd, estimated_seconds,
-      is_multihop, steps, rank_by_output, spread_bps, slippage_bps
+      is_multihop, steps, rank_by_output, spread_bps, price_impact_bps
     ) VALUES %L`,
     values
   );
@@ -96,7 +96,7 @@ export async function upsertRouteLatest(quotes: NormalizedQuote[]): Promise<void
     toInt(q.estimatedSeconds),
     toInt(q.rank),
     toInt(q.spreadBps),
-    toInt(q.slippageBps),
+    toInt(q.priceImpactBps),
   ]);
 
   const sql = format(
@@ -104,7 +104,7 @@ export async function upsertRouteLatest(quotes: NormalizedQuote[]): Promise<void
       src_chain, dst_chain, asset, amount_tier, bridge, source,
       ts, batch_id, input_amount, output_amount, output_usd, input_usd, gas_cost_usd,
       total_fee_bps, total_fee_usd, estimated_seconds,
-      rank_by_output, spread_bps, slippage_bps
+      rank_by_output, spread_bps, price_impact_bps
     ) VALUES %L
     ON CONFLICT (src_chain, dst_chain, asset, amount_tier, bridge, source)
     DO UPDATE SET
@@ -120,7 +120,7 @@ export async function upsertRouteLatest(quotes: NormalizedQuote[]): Promise<void
       estimated_seconds = EXCLUDED.estimated_seconds,
       rank_by_output = EXCLUDED.rank_by_output,
       spread_bps = EXCLUDED.spread_bps,
-      slippage_bps = EXCLUDED.slippage_bps`,
+      price_impact_bps = EXCLUDED.price_impact_bps`,
     values
   );
   await pool.query(sql);
