@@ -15,9 +15,10 @@ import { loadSkipMap, skipMap } from '../lib/aggregator-skip.js';
 
 // ─── Per-worker concurrency (batch size) ─────────────────────────────────────
 
-// Feed Bottleneck in windows large enough that it never idles between outer batches.
-// 500 tasks ≈ 25 s of work at 20 RPS — Bottleneck handles internal concurrency.
-const SQUID_WINDOW = 500;
+// Feed Bottleneck in small windows so each batch finishes well inside BATCH_MAX_MS
+// even when Squid's API is slow (avg 12-13s/call at degraded throughput).
+// 50 tasks × 13s / 20 RPS concurrency ≈ 32s — comfortably inside the 5-min guard.
+const SQUID_WINDOW = 50;
 const LIFI_CONCURRENCY   = 20;  // 3 keys × 3.33 rps = 10 rps combined
 const BUNGEE_CONCURRENCY = 8;
 const RUBIC_CONCURRENCY  = 5;   // fallback chains only — small task set
