@@ -3,11 +3,11 @@ import { pool, query } from '../connection.js';
 import { selectBestQuote, selectWorstQuote, computeSpreadBps, reRankQuotes } from '../../lib/quoteRanking.js';
 
 /**
- * Stale threshold: a route is marked stale after 3 hours without a new quote.
- * A full refresh cycle can take >2h, so a shorter window would flap routes to
- * stale mid-cycle. This is the window the matrix "best within 3 hours" uses.
+ * Stale threshold: a route is marked stale after 4 hours without a new quote.
+ * Workers run 7×/day (cycle slot ≈ 206 min); 4h gives a ~34-min buffer so
+ * routes stay active between cycles even if one runs slightly late.
  */
-export const STALE_THRESHOLD_MS = 3 * 60 * 60 * 1000; // 3 hours
+export const STALE_THRESHOLD_MS = 4 * 60 * 60 * 1000; // 4 hours
 
 /**
  * Hard TTL for route_latest rows. A quote no source has refreshed within this

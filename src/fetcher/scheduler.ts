@@ -24,13 +24,11 @@ const BUNGEE_CONCURRENCY = 8;
 const RUBIC_CONCURRENCY  = 5;   // fallback chains only — small task set
 const BRIDGE_CONCURRENCY = 8;
 
-// ─── Per-worker rest intervals (pause BETWEEN end of one cycle and start of next) ──
-
-const SQUID_REST_MS  =  5 * 60_000;  //  5 min — cycle takes ~97 min
-const LIFI_REST_MS   = 10 * 60_000;  // 10 min
-const BUNGEE_REST_MS = 15 * 60_000;  // 15 min
-const RUBIC_REST_MS  = 20 * 60_000;  // 20 min (small set — fast cycle)
-const BRIDGE_REST_MS = 10 * 60_000;  // 10 min
+// ─── Per-worker cycle target (run each worker 7× per day) ────────────────────
+// After a cycle finishes, rest = max(1 min, TARGET − elapsed).
+// If a cycle takes longer than TARGET, the 1-min floor kicks in so the worker
+// isn't starved; it'll naturally run fewer than 7× that day.
+const CYCLE_TARGET_MS = Math.round(24 * 60 * 60_000 / 7); // ≈ 205.7 min
 
 // If a cycle exceeds this, break out of the batch loop so finally{} resets the
 // running flag and the worker restarts. Prevents permanent deadlock if the rate
@@ -145,6 +143,7 @@ let bridgeRunning = false;
 async function runSquidWorker(): Promise<void> {
   if (squidRunning) return;
   squidRunning = true;
+  const cycleStart = Date.now();
   const log = logger.child({ component: 'squid-worker' } as Record<string, unknown>);
 
   try {
@@ -159,8 +158,8 @@ async function runSquidWorker(): Promise<void> {
     });
 
     const batchId = generateBatchId();
-    const start = Date.now();
-    const deadline = start + WORKER_CYCLE_MAX_MS;
+    const start = cycleStart;
+    const deadline = cycleStart + WORKER_CYCLE_MAX_MS;
     const priorityCount = tasks.filter(
       t => SQUID_PRIORITY_CHAINS.has(t.src) || SQUID_PRIORITY_CHAINS.has(t.dst)
     ).length;
@@ -210,7 +209,8 @@ async function runSquidWorker(): Promise<void> {
     log.error({ err }, 'Squid worker cycle error');
   } finally {
     squidRunning = false;
-    setTimeout(() => runSquidWorker().catch(e => logger.error(e, 'Squid worker restart error')), SQUID_REST_MS);
+    const restMs = Math.max(60_000, CYCLE_TARGET_MS - (Date.now() - cycleStart));
+    setTimeout(() => runSquidWorker().catch(e => logger.error(e, 'Squid worker restart error')), restMs);
   }
 }
 
@@ -221,14 +221,15 @@ async function runSquidWorker(): Promise<void> {
 async function runLifiWorker(): Promise<void> {
   if (lifiRunning) return;
   lifiRunning = true;
+  const cycleStart = Date.now();
   const log = logger.child({ component: 'lifi-worker' } as Record<string, unknown>);
 
   try {
     await refreshNativePrices();
     const batchId = generateBatchId();
     const tasks = buildTasks();
-    const start = Date.now();
-    const deadline = start + WORKER_CYCLE_MAX_MS;
+    const start = cycleStart;
+    const deadline = cycleStart + WORKER_CYCLE_MAX_MS;
     let totalQuotes = 0, successRoutes = 0, done = 0;
 
     log.info({ total: tasks.length, concurrency: LIFI_CONCURRENCY }, 'LI.FI worker cycle starting');
@@ -259,7 +260,8 @@ async function runLifiWorker(): Promise<void> {
     log.error({ err }, 'LI.FI worker cycle error');
   } finally {
     lifiRunning = false;
-    setTimeout(() => runLifiWorker().catch(e => logger.error(e, 'LI.FI worker restart error')), LIFI_REST_MS);
+    const restMs = Math.max(60_000, CYCLE_TARGET_MS - (Date.now() - cycleStart));
+    setTimeout(() => runLifiWorker().catch(e => logger.error(e, 'LI.FI worker restart error')), restMs);
   }
 }
 
@@ -270,14 +272,15 @@ async function runLifiWorker(): Promise<void> {
 async function runBungeeWorker(): Promise<void> {
   if (bungeeRunning) return;
   bungeeRunning = true;
+  const cycleStart = Date.now();
   const log = logger.child({ component: 'bungee-worker' } as Record<string, unknown>);
 
   try {
     await refreshNativePrices();
     const batchId = generateBatchId();
     const tasks = buildTasks();
-    const start = Date.now();
-    const deadline = start + WORKER_CYCLE_MAX_MS;
+    const start = cycleStart;
+    const deadline = cycleStart + WORKER_CYCLE_MAX_MS;
     let totalQuotes = 0, successRoutes = 0, done = 0;
 
     log.info({ total: tasks.length, concurrency: BUNGEE_CONCURRENCY }, 'Bungee worker cycle starting');
@@ -308,7 +311,8 @@ async function runBungeeWorker(): Promise<void> {
     log.error({ err }, 'Bungee worker cycle error');
   } finally {
     bungeeRunning = false;
-    setTimeout(() => runBungeeWorker().catch(e => logger.error(e, 'Bungee worker restart error')), BUNGEE_REST_MS);
+    const restMs = Math.max(60_000, CYCLE_TARGET_MS - (Date.now() - cycleStart));
+    setTimeout(() => runBungeeWorker().catch(e => logger.error(e, 'Bungee worker restart error')), restMs);
   }
 }
 
@@ -319,6 +323,7 @@ async function runBungeeWorker(): Promise<void> {
 async function runRubicWorker(): Promise<void> {
   if (rubicRunning) return;
   rubicRunning = true;
+  const cycleStart = Date.now();
   const log = logger.child({ component: 'rubic-worker' } as Record<string, unknown>);
 
   try {
@@ -327,8 +332,8 @@ async function runRubicWorker(): Promise<void> {
     const tasks = buildTasks().filter(
       t => RUBIC_CHAINS.has(t.src) || RUBIC_CHAINS.has(t.dst)
     );
-    const start = Date.now();
-    const deadline = start + WORKER_CYCLE_MAX_MS;
+    const start = cycleStart;
+    const deadline = cycleStart + WORKER_CYCLE_MAX_MS;
     let totalQuotes = 0, done = 0;
 
     log.info({ total: tasks.length, concurrency: RUBIC_CONCURRENCY }, 'Rubic worker cycle starting');
@@ -356,7 +361,8 @@ async function runRubicWorker(): Promise<void> {
     log.error({ err }, 'Rubic worker cycle error');
   } finally {
     rubicRunning = false;
-    setTimeout(() => runRubicWorker().catch(e => logger.error(e, 'Rubic worker restart error')), RUBIC_REST_MS);
+    const restMs = Math.max(60_000, CYCLE_TARGET_MS - (Date.now() - cycleStart));
+    setTimeout(() => runRubicWorker().catch(e => logger.error(e, 'Rubic worker restart error')), restMs);
   }
 }
 
@@ -372,11 +378,12 @@ async function runBridgeWorker(): Promise<void> {
   if (squidGapKeys.size === 0) {
     // Squid worker hasn't completed a cycle yet — defer
     logger.debug({ component: 'bridge-worker' }, 'No gap keys yet — deferring');
-    setTimeout(() => runBridgeWorker().catch(e => logger.error(e, 'Bridge worker restart error')), BRIDGE_REST_MS);
+    setTimeout(() => runBridgeWorker().catch(e => logger.error(e, 'Bridge worker restart error')), 60_000);
     return;
   }
 
   bridgeRunning = true;
+  const cycleStart = Date.now();
   const log = logger.child({ component: 'bridge-worker' } as Record<string, unknown>);
 
   try {
@@ -389,8 +396,8 @@ async function runBridgeWorker(): Promise<void> {
     });
 
     const batchId = generateBatchId();
-    const start = Date.now();
-    const deadline = start + WORKER_CYCLE_MAX_MS;
+    const start = cycleStart;
+    const deadline = cycleStart + WORKER_CYCLE_MAX_MS;
     let filled = 0, done = 0;
 
     log.info(
@@ -431,7 +438,8 @@ async function runBridgeWorker(): Promise<void> {
     log.error({ err }, 'Bridge worker cycle error');
   } finally {
     bridgeRunning = false;
-    setTimeout(() => runBridgeWorker().catch(e => logger.error(e, 'Bridge worker restart error')), BRIDGE_REST_MS);
+    const restMs = Math.max(60_000, CYCLE_TARGET_MS - (Date.now() - cycleStart));
+    setTimeout(() => runBridgeWorker().catch(e => logger.error(e, 'Bridge worker restart error')), restMs);
   }
 }
 
@@ -487,7 +495,7 @@ export function startScheduler(): void {
         // Rest before first cycle (data is already fresh)
         setTimeout(
           () => runSquidWorker().catch(e => logger.error(e, 'Squid worker startup error')),
-          SQUID_REST_MS
+          CYCLE_TARGET_MS
         );
       } else {
         logger.info({ component: 'squid-worker' }, 'No recent Squid data — starting full sweep');

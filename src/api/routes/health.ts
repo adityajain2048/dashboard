@@ -4,8 +4,8 @@ import { pool } from '../../db/connection.js';
 
 const startTime = Date.now();
 
-/** A route is considered stale if its newest quote is older than 3 hours. */
-const STALE_THRESHOLD_MS = 3 * 60 * 60 * 1000;
+/** A route is considered stale if its newest quote is older than 4 hours. */
+const STALE_THRESHOLD_MS = 4 * 60 * 60 * 1000;
 
 export default async function healthRoutes(
   app: FastifyInstance,
