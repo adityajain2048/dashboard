@@ -10,6 +10,7 @@ import {
   getSquidGapKeys,
   clearAllSquidSkips,
   pruneStaleRouteLatest,
+  purgeFetchLog,
 } from '../db/queries.js';
 import { loadSkipMap, skipMap } from '../lib/aggregator-skip.js';
 
@@ -468,6 +469,18 @@ export function startScheduler(): void {
   };
   setTimeout(runPrune, 60_000);
   setInterval(runPrune, 30 * 60_000);
+
+  // Purge fetch_log rows older than 7 days once per day to keep the hypertable
+  // from growing unbounded and exhausting B1ms CPU credits via index maintenance.
+  const runFetchLogPurge = (): void => {
+    purgeFetchLog(7)
+      .then((removed) => {
+        if (removed > 0) logger.info({ component: 'scheduler', removed }, `Purged ${removed} fetch_log rows older than 7 days`);
+      })
+      .catch(e => logger.warn(e, 'fetch_log purge failed'));
+  };
+  setTimeout(runFetchLogPurge, 5 * 60_000);     // 5 min after startup
+  setInterval(runFetchLogPurge, 24 * 60 * 60_000); // then every 24h
 
   // ── LI.FI, Bungee, Rubic workers — start immediately, run independently ────
   runLifiWorker().catch(e => logger.error(e, 'LI.FI worker startup error'));

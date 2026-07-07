@@ -25,6 +25,19 @@ export async function insertFetchLog(entry: FetchLogEntry): Promise<void> {
   );
 }
 
+/** Delete fetch_log rows older than the given number of days. Returns deleted row count. */
+export async function purgeFetchLog(olderThanDays: number): Promise<number> {
+  const result = await query<{ count: string }>(
+    `WITH deleted AS (
+       DELETE FROM fetch_log WHERE ts < NOW() - ($1 || ' days')::INTERVAL
+       RETURNING 1
+     )
+     SELECT COUNT(*)::text AS count FROM deleted`,
+    [olderThanDays]
+  );
+  return parseInt(result.rows[0]?.count ?? '0', 10);
+}
+
 // ─── Aggregator skip tracking ─────────────────────────────────────────────────
 
 export interface AggregatorSkipRow {

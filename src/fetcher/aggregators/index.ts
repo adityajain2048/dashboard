@@ -117,12 +117,6 @@ export async function fetchAllAggregators(
           { src: route.src, dst: route.dst, asset: route.asset, amountTier: route.amountTier },
           `${id}: adaptive skip (consecutive no-route misses)`
         );
-        await insertFetchLog({
-          batchId, ts: new Date(), srcChain: route.src, dstChain: route.dst,
-          asset: route.asset, amountTier: route.amountTier, source: id,
-          bridge: null, status: 'skipped', responseMs: 0,
-          errorMessage: 'adaptive skip', quoteCount: 0,
-        }).catch(() => {});
         return [];
       }
 
