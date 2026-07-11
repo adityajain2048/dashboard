@@ -59,8 +59,14 @@ async function settleBatch<T>(
 }
 
 // ─── Squid: only skip the initial sweep if data is THIS fresh ────────────────
-// Prevents re-sweeping on quick restart (<2 min crash-and-restart).
-const SKIP_SWEEP_IF_FRESH_MS = 2 * 60_000;
+// A full sweep is ~18,576 tasks — a massive concurrent write burst that alone
+// can exhaust a burstable B1ms DB's CPU credits within tens of minutes. A
+// 2-minute freshness window meant ANY restart beyond a crash-loop (including a
+// deliberate maintenance restart) re-triggered the full sweep, which could
+// re-exhaust credits and force another restart — a self-inflicted loop. 6h
+// still re-sweeps after genuine prolonged downtime or a fresh/restored DB, but
+// treats a routine restart as a resume, not a cold start.
+const SKIP_SWEEP_IF_FRESH_MS = 6 * 60 * 60_000;
 
 // ─── Squid priority chains ────────────────────────────────────────────────────
 // Routes touching these get sorted to the front of every Squid cycle so
@@ -482,10 +488,21 @@ export function startScheduler(): void {
   setTimeout(runFetchLogPurge, 5 * 60_000);     // 5 min after startup
   setInterval(runFetchLogPurge, 24 * 60 * 60_000); // then every 24h
 
-  // ── LI.FI, Bungee, Rubic workers — start immediately, run independently ────
+  // ── LI.FI, Bungee, Rubic workers — staggered start, then run independently ──
+  // Starting all three at t=0 concentrates their write bursts in the same
+  // window as the Squid worker's own startup work, compounding DB load right
+  // when a freshly-restarted burstable instance has the least CPU headroom.
+  // A few minutes of stagger spreads that burst out without delaying any
+  // worker's steady-state cadence (each still free-runs its own cycle after).
   runLifiWorker().catch(e => logger.error(e, 'LI.FI worker startup error'));
-  runBungeeWorker().catch(e => logger.error(e, 'Bungee worker startup error'));
-  runRubicWorker().catch(e => logger.error(e, 'Rubic worker startup error'));
+  setTimeout(
+    () => runBungeeWorker().catch(e => logger.error(e, 'Bungee worker startup error')),
+    2 * 60_000
+  );
+  setTimeout(
+    () => runRubicWorker().catch(e => logger.error(e, 'Rubic worker startup error')),
+    4 * 60_000
+  );
 
   // ── Squid worker — clear stale skips first, then check freshness ────────────
   clearAllSquidSkips()
