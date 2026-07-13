@@ -25,11 +25,20 @@ const BUNGEE_CONCURRENCY = 8;
 const RUBIC_CONCURRENCY  = 5;   // fallback chains only — small task set
 const BRIDGE_CONCURRENCY = 8;
 
-// ─── Per-worker cycle target (run each worker 7× per day) ────────────────────
+// ─── Per-worker cycle target (run each worker 3× per day) ────────────────────
 // After a cycle finishes, rest = max(1 min, TARGET − elapsed).
 // If a cycle takes longer than TARGET, the 1-min floor kicks in so the worker
-// isn't starved; it'll naturally run fewer than 7× that day.
-const CYCLE_TARGET_MS = Math.round(24 * 60 * 60_000 / 7); // ≈ 205.7 min
+// isn't starved; it'll naturally run fewer than 3× that day.
+// Was 7×/day: at that cadence, sustained CPU on the B1ms Postgres tier stayed
+// above its ~20%-of-1-vCore burst-credit baseline, draining credits to zero
+// and freezing the DB roughly every 48h regardless of the sweep-retrigger fix
+// (see scheduler startup section below). Every worker processes ALL routes ×
+// assets × tiers every cycle (buildTasks() below has no tier filtering), so
+// cycle frequency is the only free lever that reduces total daily DB write
+// volume — concurrency settings only spread the same volume over time, they
+// don't reduce it. 3×/day is a ~2.3x cut, aimed at landing sustained average
+// CPU near/under the burst baseline instead of paying for a bigger SKU.
+const CYCLE_TARGET_MS = Math.round(24 * 60 * 60_000 / 3); // ≈ 480 min (8h)
 
 // If a cycle exceeds this, break out of the batch loop so finally{} resets the
 // running flag and the worker restarts. Prevents permanent deadlock if the rate
