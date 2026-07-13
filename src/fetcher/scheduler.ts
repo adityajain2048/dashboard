@@ -531,10 +531,18 @@ export function startScheduler(): void {
           'Recent Squid data found — loading gap keys from DB, skipping initial sweep'
         );
         await refreshGapKeysFromDB();
-        // Rest before first cycle (data is already fresh)
+        // Resume soon, like the other workers' staggered starts — NOT a full
+        // CYCLE_TARGET_MS wait. That used to be a short, harmless rest when
+        // CYCLE_TARGET_MS was ~205min, but after raising both
+        // SKIP_SWEEP_IF_FRESH_MS (2min→6h) and CYCLE_TARGET_MS (205min→8h) in
+        // separate fixes, their combination meant any restart where Squid had
+        // recent data went completely silent for up to 8h — Squid never
+        // fetched again until the next natural cycle far in the future. This
+        // 1-minute resume (between LI.FI's immediate start and Bungee's 2min)
+        // keeps the sweep-skip benefit without the silent-for-hours side effect.
         setTimeout(
           () => runSquidWorker().catch(e => logger.error(e, 'Squid worker startup error')),
-          CYCLE_TARGET_MS
+          60_000
         );
       } else {
         logger.info({ component: 'squid-worker' }, 'No recent Squid data — starting full sweep');
