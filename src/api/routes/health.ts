@@ -1,11 +1,8 @@
 import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
-import { getHealth, getRouteLatestMaxTs } from '../../db/queries.js';
+import { getHealth, getRouteLatestMaxTs, STALE_THRESHOLD_MS } from '../../db/queries.js';
 import { pool } from '../../db/connection.js';
 
 const startTime = Date.now();
-
-/** A route is considered stale if its newest quote is older than 4 hours. */
-const STALE_THRESHOLD_MS = 4 * 60 * 60 * 1000;
 
 export default async function healthRoutes(
   app: FastifyInstance,

@@ -3,11 +3,18 @@ import { pool, query } from '../connection.js';
 import { selectBestQuote, selectWorstQuote, computeSpreadBps, reRankQuotes } from '../../lib/quoteRanking.js';
 
 /**
- * Stale threshold: a route is marked stale after 4 hours without a new quote.
- * Workers run 7×/day (cycle slot ≈ 206 min); 4h gives a ~34-min buffer so
- * routes stay active between cycles even if one runs slightly late.
+ * Stale threshold: a route is marked stale after this long without a new quote.
+ * Workers now run 3×/day (CYCLE_TARGET_MS ≈ 8h in scheduler.ts, cut from the
+ * original 7×/day ≈ 206min to reduce DB load — see ARCHITECTURE.md §8.2). This
+ * constant was never updated when that changed: it was still 4h, well under
+ * the new ~8h gap between a route's refreshes, so the *majority* of genuinely
+ * live routes were being marked stale (and excluded from the Leaderboard's
+ * freshness filter, which imports this same constant — see bridges.ts) simply
+ * for being mid-cycle, not because anything was actually wrong with them.
+ * 10h ≈ one full cycle (8h) + a buffer, matching the original design's ratio
+ * of "one cycle slot + buffer" to the new, longer cycle.
  */
-export const STALE_THRESHOLD_MS = 4 * 60 * 60 * 1000; // 4 hours
+export const STALE_THRESHOLD_MS = 10 * 60 * 60 * 1000; // 10 hours
 
 /**
  * Hard TTL for route_latest rows. A quote no source has refreshed within this
@@ -15,9 +22,18 @@ export const STALE_THRESHOLD_MS = 4 * 60 * 60 * 1000; // 4 hours
  * price-based, not freshness-based) long after its liquidity is gone, and it
  * keeps a genuinely-dead route looking alive. Pruning past this TTL means the
  * matrix shows either a fresh quote or an honest `dead` — never a days-old ghost.
- * 12h is well beyond the slowest refresh cadence, so live (even slow) routes survive.
+ * Was 12h, calibrated for the old ~206min cycle cadence. At the current ~8h
+ * cycle target, a route touched late in one cycle and late again in the next
+ * can legitimately go up to ~12h between refreshes with zero margin — this was
+ * pruning still-alive routes as ghosts, then relying on the next cycle to
+ * re-add them, producing a net-declining corridor count whenever prune outpaced
+ * re-fetch (confirmed in production: over half of route_latest's rows were
+ * sitting in the 10-13h age bucket, about to be or already pruned, while only
+ * ~8% were under 4h old). 24h restores a real safety margin — comfortably
+ * surviving a slow cycle or a restart-interrupted one — while still being far
+ * short of "forever," so genuinely dead routes are still caught within a day.
  */
-export const ROUTE_LATEST_TTL_HOURS = 12;
+export const ROUTE_LATEST_TTL_HOURS = 24;
 
 /**
  * Delete route_latest rows older than ROUTE_LATEST_TTL_HOURS. Returns the number
