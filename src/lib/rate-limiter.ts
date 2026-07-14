@@ -21,8 +21,20 @@ import { logger } from './logger.js';
 import { RateLimitError } from './errors.js';
 
 // Never honour a Retry-After longer than this — prevents a single 429 from
-// freezing a worker for 40+ minutes when LI.FI (or any source) issues 2400s.
-const MAX_429_PAUSE_MS = 5 * 60_000; // 5 minutes max
+// freezing a worker indefinitely when a source issues an extreme value.
+// Was 5 min, which backfired: LI.FI's observed real ban windows run
+// 13-23+ min, so a 5-min cap meant we re-hit the SAME still-active ban
+// 3+ times before it actually expired (confirmed in production: successive
+// 429s on one ban reporting 1380s → 1080s → 780s remaining — one ban, three
+// hits). Each hit multiplies the limiter's backoff rate again via
+// backoffFactor, so three hits on one ban compounded to a much harsher
+// self-imposed slowdown than the ban itself warranted, then took
+// recoveryThreshold consecutive successes to climb back — a recovery tail
+// that, combined with the worker's 4h hard cycle ceiling, was consuming
+// most of a cycle's time budget. 20 min lets a single typical ban be
+// honoured in one shot (no compounding) while still bounding the worst
+// case to a tolerable fraction of a 4h cycle.
+const MAX_429_PAUSE_MS = 20 * 60_000; // 20 minutes max
 
 // ─── Public interface ─────────────────────────────────────────────────────────
 
