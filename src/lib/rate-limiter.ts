@@ -18,7 +18,7 @@
 import Bottleneck from 'bottleneck';
 import type { AggregatorId } from '../types/index.js';
 import { logger } from './logger.js';
-import { RateLimitError } from './errors.js';
+import { RateLimitError, NoRouteError } from './errors.js';
 
 // Never honour a Retry-After longer than this — prevents a single 429 from
 // freezing a worker indefinitely when a source issues an extreme value.
@@ -265,7 +265,21 @@ export class KeyedAdaptiveLimiter implements IAdaptiveLimiter {
         return result;
       })
       .catch((err: unknown) => {
-        if (!(err instanceof RateLimitError)) limiter.recordFailure();
+        // NoRouteError docs say it "does NOT advance the circuit breaker" — but
+        // this blanket catch was calling recordFailure() for every rejection
+        // except RateLimitError, silently overriding that contract. For a
+        // provider queried across all chain pairs (Squid: ~85% no_route on this
+        // route set), no_route responses vastly outnumber real successes, so
+        // runs of 20+ consecutive no_route calls (well within statistical normal
+        // for an ~85% "failure" rate) routinely tripped the circuit breaker for
+        // something that isn't a fault at all — confirmed in production: Squid's
+        // effective throughput had collapsed to ~5% of its designed rate with
+        // almost no actual errors/timeouts, consistent with most of its time
+        // being spent in circuit-breaker cooldowns triggered by ordinary
+        // route-not-found responses.
+        if (!(err instanceof RateLimitError) && !(err instanceof NoRouteError)) {
+          limiter.recordFailure();
+        }
         throw err;
       });
   }
